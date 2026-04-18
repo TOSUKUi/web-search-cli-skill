@@ -1,0 +1,15 @@
+[project]
+name = "web-search-cli"
+version = "0.1.0"
+description = "CLI and Codex skill replacement for the hermes-web-search-plus search tool."
+requires-python = ">=3.8"
+readme = "README.md"
+license = { file = "LICENSE" }
+authors = [{ name = "local" }]
+dependencies = []
+
+[project.scripts]
+web-search-plus = "web_search_cli.search:main"
+
+[tool.setuptools]
+packages = ["web_search_cli"]
