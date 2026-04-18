@@ -21,6 +21,7 @@ Configure at least one provider for live search:
 Optional:
 
 - `WSP_CACHE_DIR` sets the cache directory.
+- If `WSP_CACHE_DIR` is unset, the default cache directory is `~/.cache/web-search-cli`.
 - `SEARXNG_ALLOW_PRIVATE=1` permits private/internal SearXNG hosts.
 
 ## Precedence

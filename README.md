@@ -8,21 +8,20 @@ The project goal is functional replacement of the search tool, not replacement o
 
 ```bash
 cp .env.example .env
-python3 -m web_search_cli.search --query "OpenAI news today" --provider auto --max-results 5
+pip install .
+web-search-plus --query "OpenAI news today" --provider auto --max-results 5 --compact
 ```
 
-For an installed command:
+For editable development:
 
 ```bash
-python3 -m pip install -e .
+pip install -e .
 web-search-plus --query "LLM scaling laws research" --provider auto --max-results 5
 ```
 
-Without installation:
+The installed CLI is provided by the `web-search-plus` console script in `pyproject.toml`.
 
-```bash
-./bin/web-search-plus --query "test query" --provider auto --max-results 5 --compact
-```
+If `web-search-plus` is not found after installation, the pip scripts directory is not on `PATH`. Add that scripts directory to `PATH`, then rerun the same `web-search-plus ...` command.
 
 ## Providers
 
@@ -47,6 +46,8 @@ The CLI reads:
 - `config.json` in the repository root
 - environment variables
 
+Search result cache is stored in `~/.cache/web-search-cli` by default. Set `WSP_CACHE_DIR` to override it.
+
 Common variables:
 
 ```bash
@@ -69,7 +70,7 @@ The Codex skill is in `skills/web-search-plus-cli/SKILL.md`. It instructs Codex 
 Non-network checks:
 
 ```bash
-python3 -m web_search_cli.search --help
-python3 -m web_search_cli.search --cache-stats --compact
-python3 -m web_search_cli.search --explain-routing --query "alternatives to Notion" --compact
+web-search-plus --help
+web-search-plus --cache-stats --compact
+web-search-plus --explain-routing --query "alternatives to Notion" --compact
 ```

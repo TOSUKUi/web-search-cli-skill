@@ -12,13 +12,13 @@ Smart Routing uses multi-signal analysis:
   - Confidence scoring
 
 Usage:
-    python3 search.py --query "..."                    # Auto-route based on query
-    python3 search.py --provider [serper|tavily|querit|exa] --query "..." [options]
+    web-search-plus --query "..."                    # Auto-route based on query
+    web-search-plus --provider [serper|tavily|querit|exa] --query "..." [options]
 
 Examples:
-    python3 search.py -q "iPhone 16 Pro price"              # → Serper (shopping intent)
-    python3 search.py -q "how does quantum entanglement work"  # → Tavily (research intent)
-    python3 search.py -q "startups similar to Notion"       # → Exa (discovery intent)
+    web-search-plus -q "iPhone 16 Pro price"              # → Serper (shopping intent)
+    web-search-plus -q "how does quantum entanglement work"  # → Tavily (research intent)
+    web-search-plus -q "startups similar to Notion"       # → Exa (discovery intent)
 """
 
 import argparse
@@ -40,7 +40,8 @@ from urllib.parse import quote, urlparse
 # Result Caching
 # =============================================================================
 
-CACHE_DIR = Path(os.environ.get("WSP_CACHE_DIR", os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".cache")))
+DEFAULT_CACHE_DIR = Path.home() / ".cache" / "web-search-cli"
+CACHE_DIR = Path(os.environ.get("WSP_CACHE_DIR", str(DEFAULT_CACHE_DIR))).expanduser()
 PROVIDER_HEALTH_FILE = CACHE_DIR / "provider_health.json"
 DEFAULT_CACHE_TTL = 3600  # 1 hour in seconds
 
@@ -2411,10 +2412,10 @@ Intelligent Auto-Routing:
     "what is", "current status", local events, synthesized up-to-date answers
 
 Examples:
-  python3 search.py -q "iPhone 16 Pro Max price"          # → Serper (shopping)
-  python3 search.py -q "how does HTTPS encryption work"   # → Tavily (research)
-  python3 search.py -q "startups similar to Notion"       # → Exa (discovery)
-  python3 search.py --explain-routing -q "your query"     # Debug routing
+  web-search-plus -q "iPhone 16 Pro Max price"          # → Serper (shopping)
+  web-search-plus -q "how does HTTPS encryption work"   # → Tavily (research)
+  web-search-plus -q "startups similar to Notion"       # → Exa (discovery)
+  web-search-plus --explain-routing -q "your query"     # Debug routing
 
 Full docs: See README.md and SKILL.md
         """,

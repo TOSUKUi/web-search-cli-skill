@@ -26,11 +26,11 @@ The CLI should preserve:
 ## Useful Invocations
 
 ```bash
-./bin/web-search-plus --query "..." --provider auto --max-results 5 --compact
-./bin/web-search-plus --query "..." --provider exa --exa-depth deep --compact
-./bin/web-search-plus --query "..." --time-range week --include-domains arxiv.org github.com --compact
-./bin/web-search-plus --provider exa --similar-url "https://example.com" --compact
-./bin/web-search-plus --explain-routing --query "alternatives to Notion" --compact
-./bin/web-search-plus --cache-stats --compact
-./bin/web-search-plus --clear-cache --compact
+web-search-plus --query "..." --provider auto --max-results 5 --compact
+web-search-plus --query "..." --provider exa --exa-depth deep --compact
+web-search-plus --query "..." --time-range week --include-domains arxiv.org github.com --compact
+web-search-plus --provider exa --similar-url "https://example.com" --compact
+web-search-plus --explain-routing --query "alternatives to Notion" --compact
+web-search-plus --cache-stats --compact
+web-search-plus --clear-cache --compact
 ```

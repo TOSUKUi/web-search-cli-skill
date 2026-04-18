@@ -13,23 +13,13 @@ Provide `hermes-web-search-plus` search-tool functionality through a CLI plus th
 
 ## Command
 
-From the repository root:
+Use the installed CLI after `pip install .`:
 
 ```bash
-./bin/web-search-plus --query "<query>" --provider auto --max-results 5 --compact
+web-search-plus --query "<query>" --provider auto --max-results 5 --compact
 ```
 
-Equivalent module invocation:
-
-```bash
-python3 -m web_search_cli.search --query "<query>" --provider auto --max-results 5 --compact
-```
-
-Fallback direct script invocation:
-
-```bash
-python3 web_search_cli/search.py --query "<query>" --provider auto --max-results 5 --compact
-```
+If `web-search-plus` is not found after installation, the pip scripts directory is not on `PATH`. Do not switch interfaces unless the user asks; fix `PATH` and keep using the CLI.
 
 ## Provider Selection
 
@@ -85,7 +75,7 @@ For exact flag mapping and output examples, read only the needed reference:
 Before relying on live provider calls, verify the CLI shape:
 
 ```bash
-./bin/web-search-plus --help
-./bin/web-search-plus --cache-stats --compact
-./bin/web-search-plus --explain-routing --query "alternatives to Notion" --compact
+web-search-plus --help
+web-search-plus --cache-stats --compact
+web-search-plus --explain-routing --query "alternatives to Notion" --compact
 ```
