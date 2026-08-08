@@ -79,7 +79,13 @@ The CLI reads:
 - `config.json` in the repository root (override with `--config`)
 - environment variables
 
-In server mode, a `.env` beside the file passed to `--config` is also loaded. Search result cache is stored in `~/.cache/web-search-cli` by default. Set `WSP_CACHE_DIR` to override it.
+A `.env` file is optional in standalone mode. You can set provider credentials directly in the process environment instead:
+
+```bash
+EXA_API_KEY=your-exa-key web-search-plus --provider exa --query "latest AI news" --compact
+```
+
+Use `export NAME=value` when the variables should apply to subsequent commands. If the same variable exists in both places, the process environment takes precedence over `.env`. In server mode, a `.env` beside the file passed to `--config` is also loaded. Search result cache is stored in `~/.cache/web-search-cli` by default. Set `WSP_CACHE_DIR` to override it.
 
 ### Multiple API keys
 

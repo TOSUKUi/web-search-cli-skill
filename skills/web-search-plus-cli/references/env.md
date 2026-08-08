@@ -27,6 +27,16 @@ Optional:
 - `WSP_SERVER_TOKEN` protects the central server; `WSP_SERVER_HOST` and `WSP_SERVER_PORT` configure its bind address.
 - `SEARXNG_ALLOW_PRIVATE=1` permits private/internal SearXNG hosts.
 
+## Standalone without `.env`
+
+A repository `.env` file is optional. Set credentials directly in the process environment:
+
+```bash
+EXA_API_KEY=your-exa-key web-search-plus --provider exa --query "latest AI news" --compact
+```
+
+Use `export NAME=value` for subsequent commands. Process environment variables take precedence over values from `.env`.
+
 ## Multiple API keys
 
 Use a comma-separated environment variable:

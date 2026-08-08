@@ -70,11 +70,14 @@ Bright Dataでは`BRIGHTDATA_API_KEY`とSERP zone（`BRIGHTDATA_SERP_ZONE`また
 
 ### Standalone mode（デフォルト）
 
-CLIがローカルで検索を実行します。認証情報と`config.json`/`.env`はローカルマシンから読み込みます。
+CLIがローカルで検索を実行します。認証情報と`config.json`/`.env`はローカルマシンから読み込みます。`.env`は必須ではなく、プロセスの環境変数を直接指定して実行することもできます。
 
 ```bash
-web-search-plus --provider auto --query "..." --compact
+EXA_API_KEY=your-exa-key web-search-plus \
+  --provider exa --query "latest AI news" --compact
 ```
+
+`export NAME=value`で後続コマンド向けに設定することもできます。同じ変数が`.env`とプロセス環境の両方にある場合は、プロセス環境の値が優先されます。
 
 `--serve`や`--satellite`を指定しない場合はこのモードです。
 

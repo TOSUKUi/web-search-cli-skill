@@ -23,7 +23,7 @@ The CLI performs the search locally. Provider credentials and `config.json`/`.en
 web-search-plus --provider auto --query "..." --compact
 ```
 
-This is the normal mode and remains the fallback when no satellite URL is configured.
+This is the normal mode and remains the fallback when no satellite URL is configured. A repository `.env` is optional: provider credentials can be supplied directly as process environment variables, for example `EXA_API_KEY=your-exa-key web-search-plus --provider exa --query "..." --compact`. Process environment variables take precedence over values from `.env`.
 
 ### Server mode (central)
 
@@ -99,7 +99,7 @@ Live searches require at least one configured provider:
 - `BRIGHTDATA_API_KEY` and `BRIGHTDATA_SERP_ZONE`
 - `SEARXNG_INSTANCE_URL`
 
-The CLI reads `.env`, `config.json` (or `--config PATH`), and the process environment from the repository root. Multiple keys for one provider can be comma-separated in its environment variable, for example `SERPER_API_KEY=key-1,key-2`; keys are tried in order. A JSON array is also accepted for `api_key` in `config.json`.
+The CLI reads `.env`, `config.json` (or `--config PATH`), and the process environment from the repository root. `.env` is optional in standalone mode; use `export NAME=value` or prefix a command with `NAME=value` when supplying credentials directly. Process environment variables take precedence over `.env`. Multiple keys for one provider can be comma-separated in its environment variable, for example `SERPER_API_KEY=key-1,key-2`; keys are tried in order. A JSON array is also accepted for `api_key` in `config.json`.
 
 For Docker-based server deployment, use `docker-compose.yml`; it mounts `config.json` read-only and persists the cache in a named volume. See [Runtime Modes](#runtime-modes) for the standalone, server, and satellite contracts.
 
