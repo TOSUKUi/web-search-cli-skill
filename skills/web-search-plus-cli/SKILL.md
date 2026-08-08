@@ -11,6 +11,43 @@ Use this skill when current web evidence is needed and the local repository CLI 
 
 Provide `hermes-web-search-plus` search-tool functionality through a CLI plus this skill. The plugin host is out of scope.
 
+## Runtime Modes
+
+Choose exactly one of these modes for each invocation:
+
+### Standalone mode (default)
+
+The CLI performs the search locally. Provider credentials and `config.json`/`.env` are read from the local machine. Do not use `--serve` or `--satellite`.
+
+```bash
+web-search-plus --provider auto --query "..." --compact
+```
+
+This is the normal mode and remains the fallback when no satellite URL is configured.
+
+### Server mode (central)
+
+`--serve` starts the central HTTP search server. The server reads the config and provider credentials on its own host, then executes search requests received from satellites.
+
+```bash
+web-search-plus --serve \
+  --config /srv/web-search/config.json \
+  --server-host 127.0.0.1 --server-port 8765
+```
+
+`WSP_SERVER_TOKEN`/`--server-token` are optional. When set, satellites must send the matching `--satellite-token`; when unset, the server is unauthenticated and should stay on a trusted network. The built-in server is HTTP only; use TLS termination or an SSH tunnel for non-local traffic. `docker-compose.yml` is the supported containerized server setup.
+
+### Satellite mode (client)
+
+`--satellite URL` forwards the search request to a server instead of calling providers locally. The satellite does not need provider API keys; provider credentials are resolved by the central server.
+
+```bash
+web-search-plus --satellite http://127.0.0.1:8765 \
+  --provider auto --query "..." --compact
+```
+
+The satellite forwards search options but cannot override central config or credential-bearing provider endpoints. `--serve` takes precedence if both controls are supplied, so do not combine the modes. `WSP_SATELLITE_URL` can select satellite mode without adding the flag.
+
 ## Command
 
 Use the installed CLI after `pip install .`:
@@ -31,6 +68,11 @@ If `web-search-plus` is not found after installation, the pip scripts directory 
 - Use `--provider perplexity` for synthesized direct answers when configured.
 - Use `--provider you` for LLM-ready snippets and current overview queries when configured.
 - Use `--provider searxng` for a configured self-hosted/private metasearch instance.
+- Use `--provider google_cse` for a configured Programmable Search Engine (`GOOGLE_CSE_API_KEY` + `GOOGLE_CSE_ID`).
+- Use `--provider serpapi` or `--provider scraperapi` for normalized SERP-scraping APIs.
+- Use `--provider brightdata` for Bright Data’s direct SERP REST API; configure `BRIGHTDATA_API_KEY` and `BRIGHTDATA_SERP_ZONE`.
+
+See `docs/providers.md` for the free-tier/monthly-quota catalog and official links.
 
 ## Common Options
 
@@ -51,9 +93,15 @@ Live searches require at least one configured provider:
 - `QUERIT_API_KEY`
 - `PERPLEXITY_API_KEY` or `KILOCODE_API_KEY`
 - `YOU_API_KEY`
+- `GOOGLE_CSE_API_KEY` and `GOOGLE_CSE_ID`
+- `SERPAPI_API_KEY`
+- `SCRAPERAPI_API_KEY`
+- `BRIGHTDATA_API_KEY` and `BRIGHTDATA_SERP_ZONE`
 - `SEARXNG_INSTANCE_URL`
 
-The CLI reads `.env`, `config.json`, and the process environment from the repository root.
+The CLI reads `.env`, `config.json` (or `--config PATH`), and the process environment from the repository root. Multiple keys for one provider can be comma-separated in its environment variable, for example `SERPER_API_KEY=key-1,key-2`; keys are tried in order. A JSON array is also accepted for `api_key` in `config.json`.
+
+For Docker-based server deployment, use `docker-compose.yml`; it mounts `config.json` read-only and persists the cache in a named volume. See [Runtime Modes](#runtime-modes) for the standalone, server, and satellite contracts.
 
 ## Output Handling
 

@@ -4,6 +4,9 @@ __pycache__/
 .env
 config.json
 *.egg-info/
+.credentials.local
+credentials.local
+secrets/
 build/
 dist/
 hermes-web-search-plus/

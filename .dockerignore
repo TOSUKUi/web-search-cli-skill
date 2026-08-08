@@ -1,0 +1,12 @@
+.git
+.env
+config.json
+.cache
+__pycache__
+*.py[cod]
+*.egg-info
+build
+dist
+secrets
+credentials.local
+.credentials.local

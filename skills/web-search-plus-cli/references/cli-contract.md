@@ -5,7 +5,7 @@
 The CLI replaces the `web_search_plus` tool surface:
 
 - `query` -> `--query`
-- `provider` -> `--provider auto|serper|tavily|exa|querit|perplexity|you|searxng`
+- `provider` -> `--provider auto|serper|tavily|exa|querit|perplexity|you|searxng|google_cse|serpapi|scraperapi|brightdata`
 - `count` -> `--max-results`
 - `depth` -> `--exa-depth normal|deep|deep-reasoning`
 - `time_range` -> `--time-range day|week|month|year`
@@ -16,7 +16,7 @@ The CLI replaces the `web_search_plus` tool surface:
 
 The CLI should preserve:
 
-- Seven providers: Serper, Tavily, Querit, Exa, Perplexity, You.com, SearXNG.
+- Eleven providers: Serper, Tavily, Querit, Exa, Perplexity, You.com, SearXNG, Google CSE, SerpApi, ScraperAPI, Bright Data.
 - Auto-routing with routing transparency.
 - Exa `normal`, `deep`, `deep-reasoning`, and `--similar-url`.
 - Provider fallback, retry, cooldown, and deduplication.
@@ -33,4 +33,5 @@ web-search-plus --provider exa --similar-url "https://example.com" --compact
 web-search-plus --explain-routing --query "alternatives to Notion" --compact
 web-search-plus --cache-stats --compact
 web-search-plus --clear-cache --compact
+web-search-plus --satellite http://127.0.0.1:8765 --query "..." --compact
 ```

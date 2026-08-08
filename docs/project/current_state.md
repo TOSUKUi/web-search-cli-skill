@@ -16,6 +16,7 @@ The repository is being bootstrapped as `web-search-cli`: a CLI plus Codex skill
 - Package the CLI for direct use through installed console script `web-search-plus`.
 - Document the Codex skill contract in `skills/web-search-plus-cli/SKILL.md`.
 - Validate non-network CLI paths before live provider testing.
+- Expand provider choices with free-tier/monthly-quota candidates while preserving existing auto-routing behavior.
 
 ## Recent Accepted Changes
 
@@ -24,9 +25,16 @@ The repository is being bootstrapped as `web-search-cli`: a CLI plus Codex skill
 - Added `.gitignore` entries for generated Python/cache/config artifacts.
 - Clarified that normal `pip install .` should expose the `web-search-plus` CLI, and user-facing docs should stay on CLI-only usage.
 - Set the default search-result cache directory to `~/.cache/web-search-cli`, with `WSP_CACHE_DIR` override preserved.
+- Added multiple provider API keys via comma-separated environment variables or JSON arrays, with ordered key fallback and legacy single-key compatibility.
+- Added optional central server/satellite mode (`--serve` and `--satellite`); the central host owns credentials/config and exposes optionally authenticated search and health endpoints.
+- Added a minimal Docker Compose deployment (`docker-compose.yml`) with a read-only central config mount, optional server token, non-root container user, and persistent cache volume.
+- Added a Japanese user-facing README at `README.ja.md` and linked it from the English README.
+- Added Google Custom Search JSON, SerpApi, ScraperAPI, and Bright Data adapters plus a broader free-tier catalog in `docs/providers.md`.
 
 ## Open Risks
 
 - Live provider behavior requires API keys or a reachable SearXNG instance.
 - Network-bound provider calls are not validated by non-network checks.
-- The reference project has no test suite, so parity is currently structural and CLI-contract based.
+- Satellite mode has been exercised locally with the central HTTP server, but live provider execution through it still requires credentials.
+- The reference project has no test suite; this repository now has focused non-network provider parsing/config tests.
+- Four additional explicit/fallback adapters are implemented: Google Custom Search JSON, SerpApi, ScraperAPI, and Bright Data. See `docs/providers.md` for the broader candidate catalog and quota caveats.

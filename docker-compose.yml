@@ -1,0 +1,35 @@
+services:
+  web-search-central:
+    build:
+      context: .
+    image: web-search-cli:local
+    command:
+      - --serve
+      - --config
+      - /etc/web-search/config.json
+      - --server-host
+      - 0.0.0.0
+      - --server-port
+      - "8765"
+    env_file:
+      - .env
+    environment:
+      WSP_CACHE_DIR: /home/wsp/.cache/web-search-cli
+    ports:
+      - "${WSP_PUBLISHED_PORT:-8765}:8765"
+    volumes:
+      - ./config.json:/etc/web-search/config.json:ro
+      - web_search_cache:/home/wsp/.cache/web-search-cli
+    restart: unless-stopped
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          python -c "import os,urllib.request; t=os.environ.get('WSP_SERVER_TOKEN'); h={'Authorization':'Bearer '+t} if t else {}; r=urllib.request.Request('http://127.0.0.1:8765/health', headers=h); urllib.request.urlopen(r, timeout=2).read()"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  web_search_cache:

@@ -2,7 +2,7 @@
 """
 Web Search Plus — Unified Multi-Provider Search with Intelligent Auto-Routing
 Supports: Serper (Google), Tavily (Research), Querit (Multilingual AI Search),
-Exa (Neural), Perplexity (Direct Answers)
+Exa (Neural), Perplexity (Direct Answers), Google CSE, SerpApi, ScraperAPI, Bright Data
 
 Smart Routing uses multi-signal analysis:
   - Query intent classification (shopping, research, discovery)
@@ -13,7 +13,7 @@ Smart Routing uses multi-signal analysis:
 
 Usage:
     web-search-plus --query "..."                    # Auto-route based on query
-    web-search-plus --provider [serper|tavily|querit|exa] --query "..." [options]
+    web-search-plus --provider [serper|tavily|querit|exa|google_cse|serpapi|scraperapi|brightdata] --query "..." [options]
 
 Examples:
     web-search-plus -q "iPhone 16 Pro price"              # → Serper (shopping intent)
@@ -33,7 +33,7 @@ from pathlib import Path
 from typing import Optional, List, Dict, Any, Tuple
 from urllib.request import Request, urlopen
 from urllib.error import HTTPError, URLError
-from urllib.parse import quote, urlparse
+from urllib.parse import quote, urlencode, urlparse
 
 
 # =============================================================================
@@ -246,9 +246,9 @@ def cache_stats() -> Dict[str, Any]:
 # =============================================================================
 # Auto-load .env from skill directory (if exists)
 # =============================================================================
-def _load_env_file():
-    """Load .env file from skill root directory if it exists."""
-    env_path = Path(__file__).parent.parent / ".env"
+def _load_env_file(env_path: Optional[Path] = None):
+    """Load a dotenv-style file without overriding process environment variables."""
+    env_path = env_path or (Path(__file__).parent.parent / ".env")
     if env_path.exists():
         with open(env_path) as f:
             for line in f:
@@ -278,7 +278,7 @@ DEFAULT_CONFIG = {
     "auto_routing": {
         "enabled": True,
         "fallback_provider": "serper",
-        "provider_priority": ["tavily", "querit", "exa", "perplexity", "serper", "you", "searxng"],
+        "provider_priority": ["tavily", "querit", "exa", "perplexity", "serper", "you", "searxng", "google_cse", "serpapi", "scraperapi", "brightdata"],
         "disabled_providers": [],
         "confidence_threshold": 0.3,  # Below this, note low confidence
     },
@@ -314,14 +314,31 @@ DEFAULT_CONFIG = {
         "safesearch": 0,  # 0=off, 1=moderate, 2=strict
         "engines": None,  # Optional list of engines to use
         "language": "en"
+    },
+    "google_cse": {
+        "cx": None
+    },
+    "serpapi": {
+        "engine": "google"
+    },
+    "scraperapi": {
+        "country": "us",
+        "language": "en"
+    },
+    "brightdata": {
+        "zone": None,
+        "engine": "google",
+        "country": "us",
+        "language": "en"
     }
 }
 
 
-def load_config() -> Dict[str, Any]:
-    """Load configuration from config.json if it exists, with defaults."""
+def load_config(config_path: Optional[str] = None) -> Dict[str, Any]:
+    """Load configuration from the selected config file if it exists, with defaults."""
     config = DEFAULT_CONFIG.copy()
-    config_path = Path(__file__).parent.parent / "config.json"
+    config_path = Path(config_path).expanduser() if config_path else _default_config_path()
+    _load_env_file(config_path.parent / ".env")
     
     if config_path.exists():
         try:
@@ -341,36 +358,61 @@ def load_config() -> Dict[str, Any]:
     return config
 
 
-def get_api_key(provider: str, config: Dict[str, Any] = None) -> Optional[str]:
-    """Get API key for provider from config.json or environment.
-    
-    Priority: config.json > .env > environment variable
-    
-    Note: SearXNG doesn't require an API key, but returns instance_url if configured.
-    """
-    # Special case: SearXNG uses instance_url instead of API key
+def _default_config_path() -> Path:
+    return Path(os.environ.get("WSP_CONFIG_PATH", str(Path(__file__).parent.parent / "config.json"))).expanduser()
+
+
+def get_provider_config(provider: str, config: Dict[str, Any]) -> Dict[str, Any]:
+    """Return provider settings; credentials may be a string or list."""
+    provider_config = config.get(provider, {}) if isinstance(config, dict) else {}
+    return dict(provider_config) if isinstance(provider_config, dict) else {}
+
+
+def _split_api_keys(value: Any) -> List[str]:
+    """Normalize a config value or comma-separated environment value into keys."""
+    if isinstance(value, list):
+        values = value
+    elif value is None:
+        values = []
+    else:
+        values = str(value).split(",")
+    return [str(item).strip() for item in values if str(item).strip()]
+
+
+def get_api_keys(provider: str, config: Dict[str, Any] = None) -> List[str]:
+    """Return all credentials for a provider in configured order."""
+    config = config or {}
     if provider == "searxng":
-        return get_searxng_instance_url(config)
-    
-    # Check config.json first
-    if config:
-        provider_config = config.get(provider, {})
-        if isinstance(provider_config, dict):
-            key = provider_config.get("api_key") or provider_config.get("apiKey")
-            if key:
-                return key
-    
-    # Then check environment
+        instance_url = get_searxng_instance_url(config)
+        return [instance_url] if instance_url else []
+
+    provider_config = get_provider_config(provider, config)
+    key = provider_config.get("api_key") or provider_config.get("apiKey")
+    if key:
+        return _split_api_keys(key)
     if provider == "perplexity":
-        return os.environ.get("PERPLEXITY_API_KEY") or os.environ.get("KILOCODE_API_KEY")
+        return _split_api_keys(os.environ.get("PERPLEXITY_API_KEY") or os.environ.get("KILOCODE_API_KEY"))
     key_map = {
-        "serper": "SERPER_API_KEY",
-        "tavily": "TAVILY_API_KEY",
-        "querit": "QUERIT_API_KEY",
-        "exa": "EXA_API_KEY",
-        "you": "YOU_API_KEY",
+        "serper": "SERPER_API_KEY", "tavily": "TAVILY_API_KEY", "querit": "QUERIT_API_KEY",
+        "exa": "EXA_API_KEY", "you": "YOU_API_KEY", "google_cse": "GOOGLE_CSE_API_KEY",
+        "serpapi": "SERPAPI_API_KEY", "scraperapi": "SCRAPERAPI_API_KEY", "brightdata": "BRIGHTDATA_API_KEY",
     }
-    return os.environ.get(key_map.get(provider, ""))
+    return _split_api_keys(os.environ.get(key_map.get(provider, "")))
+
+
+def get_api_key(provider: str, config: Dict[str, Any] = None) -> Optional[str]:
+    """Return the first provider credential for backward compatibility."""
+    keys = get_api_keys(provider, config)
+    return keys[0] if keys else None
+
+
+def get_brightdata_zone(config: Dict[str, Any] = None) -> Optional[str]:
+    """Get the Bright Data SERP zone from config or environment."""
+    if config:
+        provider_config = get_provider_config("brightdata", config)
+        if provider_config.get("zone"):
+            return provider_config["zone"]
+    return os.environ.get("BRIGHTDATA_SERP_ZONE")
 
 
 def _validate_searxng_url(url: str) -> str:
@@ -420,24 +462,13 @@ def _validate_searxng_url(url: str) -> str:
 
 
 def get_searxng_instance_url(config: Dict[str, Any] = None) -> Optional[str]:
-    """Get SearXNG instance URL from config or environment.
-    
-    SearXNG is self-hosted, so no API key needed - just the instance URL.
-    Priority: config.json > SEARXNG_INSTANCE_URL environment variable
-    
-    Security: URL is validated to prevent SSRF via scheme enforcement.
-    Both config sources (config.json, env var) are operator-controlled,
-    not agent-controlled, so private IPs like localhost are permitted.
-    """
-    # Check config.json first
+    """Get the selected SearXNG instance URL from config or environment."""
     if config:
-        searxng_config = config.get("searxng", {})
-        if isinstance(searxng_config, dict):
-            url = searxng_config.get("instance_url")
-            if url:
-                return _validate_searxng_url(url)
-    
-    # Then check environment
+        searxng_config = get_provider_config("searxng", config)
+        url = searxng_config.get("instance_url")
+        if url:
+            return _validate_searxng_url(url)
+
     env_url = os.environ.get("SEARXNG_INSTANCE_URL")
     if env_url:
         return _validate_searxng_url(env_url)
@@ -450,9 +481,15 @@ def get_env_key(provider: str) -> Optional[str]:
     return get_api_key(provider)
 
 
-def validate_api_key(provider: str, config: Dict[str, Any] = None) -> str:
-    """Validate and return API key (or instance URL for SearXNG), with helpful error messages."""
-    key = get_api_key(provider, config)
+def validate_api_key(
+    provider: str,
+    config: Dict[str, Any] = None,
+    key_override: Optional[str] = None,
+) -> str:
+    """Validate and return one provider credential."""
+    config = config or {}
+    effective_config = get_provider_config(provider, config)
+    key = key_override if key_override is not None else get_api_key(provider, config)
     
     # Special handling for SearXNG - it needs instance URL, not API key
     if provider == "searxng":
@@ -481,13 +518,17 @@ def validate_api_key(provider: str, config: Dict[str, Any] = None) -> str:
         return key
     
     if not key:
-        env_var = {
+        env_var = effective_config.get("api_key_env") or effective_config.get("apiKeyEnv") or {
             "serper": "SERPER_API_KEY",
             "tavily": "TAVILY_API_KEY",
             "querit": "QUERIT_API_KEY",
             "exa": "EXA_API_KEY",
             "you": "YOU_API_KEY",
-            "perplexity": "KILOCODE_API_KEY"
+            "perplexity": "KILOCODE_API_KEY",
+            "google_cse": "GOOGLE_CSE_API_KEY",
+            "serpapi": "SERPAPI_API_KEY",
+            "scraperapi": "SCRAPERAPI_API_KEY",
+            "brightdata": "BRIGHTDATA_API_KEY",
         }[provider]
         
         urls = {
@@ -496,7 +537,11 @@ def validate_api_key(provider: str, config: Dict[str, Any] = None) -> str:
             "querit": "https://querit.ai",
             "exa": "https://exa.ai",
             "you": "https://api.you.com",
-            "perplexity": "https://api.kilo.ai"
+            "perplexity": "https://api.kilo.ai",
+            "google_cse": "https://developers.google.com/custom-search/v1/overview",
+            "serpapi": "https://serpapi.com/",
+            "scraperapi": "https://www.scraperapi.com/features/google/",
+            "brightdata": "https://brightdata.com/products/serp-api"
         }
         
         error_msg = {
@@ -516,6 +561,33 @@ def validate_api_key(provider: str, config: Dict[str, Any] = None) -> str:
             "error": f"API key for {provider} appears invalid (too short)",
             "provider": provider
         }))
+
+    if provider == "brightdata":
+        if not get_brightdata_zone(config):
+            raise ProviderConfigError(json.dumps({
+                "error": "Missing Bright Data SERP zone",
+                "env_var": "BRIGHTDATA_SERP_ZONE",
+                "how_to_fix": [
+                    "Create or select a Bright Data SERP API zone.",
+                    "Set BRIGHTDATA_SERP_ZONE or add brightdata.zone to config.json."
+                ],
+                "provider": provider
+            }))
+
+    if provider == "google_cse":
+        google_config = effective_config
+        cx = google_config.get("cx") if isinstance(google_config, dict) else None
+        cx = cx or os.environ.get("GOOGLE_CSE_ID")
+        if not cx:
+            raise ProviderConfigError(json.dumps({
+                "error": "Missing Google Programmable Search Engine ID",
+                "env_var": "GOOGLE_CSE_ID",
+                "how_to_fix": [
+                    "Create or select a Programmable Search Engine.",
+                    "Set GOOGLE_CSE_ID or add google_cse.cx to config.json."
+                ],
+                "provider": provider
+            }))
 
     return key
 
@@ -1372,7 +1444,7 @@ def explain_routing(query: str, config: Dict[str, Any]) -> Dict[str, Any]:
             if matches
         },
         "available_providers": [
-            p for p in ["serper", "tavily", "querit", "exa", "perplexity", "you", "searxng"]
+            p for p in ["serper", "tavily", "querit", "exa", "perplexity", "you", "searxng", "google_cse", "serpapi", "scraperapi", "brightdata"]
             if get_api_key(p, config) and p not in config.get("auto_routing", {}).get("disabled_providers", [])
         ]
     }
@@ -1545,6 +1617,224 @@ def make_request(url: str, headers: dict, body: dict, timeout: int = 30) -> dict
         )
     except TimeoutError:
         raise ProviderRequestError(f"Request timed out after {timeout}s. Try again or reduce max_results.", transient=True)
+
+
+def make_get_request(url: str, headers: Optional[dict] = None, timeout: int = 30) -> dict:
+    """Make an HTTP GET request and return a JSON response."""
+    request_headers = dict(headers or {})
+    request_headers.setdefault("User-Agent", "ClawdBot-WebSearchPlus/3.0")
+    req = Request(url, headers=request_headers, method="GET")
+    try:
+        with urlopen(req, timeout=timeout) as response:
+            return json.loads(response.read().decode("utf-8"))
+    except HTTPError as e:
+        error_body = e.read().decode("utf-8") if e.fp else str(e)
+        try:
+            error_json = json.loads(error_body)
+            error_detail = error_json.get("error") or error_json.get("message") or error_body
+        except json.JSONDecodeError:
+            error_detail = error_body[:500]
+        error_messages = {
+            401: "Invalid or expired API key. Please check your credentials.",
+            403: "Access forbidden. Your API key may not have permission for this operation.",
+            429: "Rate limit exceeded. Please wait a moment and try again.",
+            500: "Server error. The search provider is experiencing issues.",
+            503: "Service unavailable. The search provider may be down.",
+        }
+        friendly_msg = error_messages.get(e.code, f"API error: {error_detail}")
+        raise ProviderRequestError(
+            f"{friendly_msg} (HTTP {e.code})",
+            status_code=e.code,
+            transient=e.code in TRANSIENT_HTTP_CODES,
+        )
+    except URLError as e:
+        reason = str(getattr(e, "reason", e))
+        is_timeout = "timed out" in reason.lower()
+        raise ProviderRequestError(f"Network error: {reason}. Check your internet connection.", transient=is_timeout)
+    except (IncompleteRead, TimeoutError) as e:
+        raise ProviderRequestError(f"Request timed out or was interrupted: {e}", transient=True)
+
+
+# =============================================================================
+# Additional free-tier search APIs
+# =============================================================================
+
+def _result_from_item(item: Dict[str, Any], provider: str, index: int) -> Dict[str, Any]:
+    """Map common SERP item fields to the CLI result schema."""
+    raw_score = item.get("score")
+    try:
+        score = float(raw_score) if raw_score is not None else 1.0 - index * 0.05
+    except (TypeError, ValueError):
+        score = 1.0 - index * 0.05
+    return {
+        "title": item.get("title", ""),
+        "url": item.get("url") or item.get("link", ""),
+        "snippet": item.get("snippet") or item.get("description") or item.get("content", ""),
+        "score": round(score, 3),
+        "provider": provider,
+    }
+
+
+def search_google_cse(
+    query: str,
+    api_key: str,
+    search_engine_id: str,
+    max_results: int = 5,
+    start: int = 1,
+) -> dict:
+    """Search Google Programmable Search JSON API."""
+    params = {
+        "key": api_key,
+        "cx": search_engine_id,
+        "q": query,
+        "num": min(max_results, 10),
+        "start": max(1, start),
+    }
+    url = "https://www.googleapis.com/customsearch/v1?" + urlencode(params)
+    data = make_get_request(url)
+    if data.get("error"):
+        raise ProviderRequestError(str(data["error"]))
+    results = [_result_from_item(item, "google_cse", i) for i, item in enumerate(data.get("items", [])[:max_results])]
+    return {
+        "provider": "google_cse",
+        "query": query,
+        "results": results,
+        "images": [],
+        "answer": results[0]["snippet"] if results else "",
+        "metadata": {"total_results": (data.get("searchInformation") or {}).get("totalResults")},
+    }
+
+
+def search_serpapi(
+    query: str,
+    api_key: str,
+    max_results: int = 5,
+    engine: str = "google",
+) -> dict:
+    """Search SerpApi's normalized search-engine results."""
+    params = {"api_key": api_key, "engine": engine, "q": query, "num": min(max_results, 100)}
+    url = "https://serpapi.com/search.json?" + urlencode(params)
+    data = make_get_request(url)
+    if data.get("error"):
+        raise ProviderRequestError(str(data["error"]))
+    results = [_result_from_item(item, "serpapi", i) for i, item in enumerate(data.get("organic_results", [])[:max_results])]
+    answer_box = data.get("answer_box") or {}
+    answer = answer_box.get("answer") or answer_box.get("snippet") or (results[0]["snippet"] if results else "")
+    return {
+        "provider": "serpapi",
+        "query": query,
+        "results": results,
+        "images": [],
+        "answer": answer,
+        "metadata": {"search_metadata": data.get("search_metadata", {})},
+    }
+
+
+def search_scraperapi(
+    query: str,
+    api_key: str,
+    max_results: int = 5,
+    country: str = "us",
+    language: str = "en",
+) -> dict:
+    """Search ScraperAPI's structured Google SERP endpoint."""
+    params = {
+        "api_key": api_key,
+        "query": query,
+        "num": min(max_results, 100),
+        "country_code": country,
+        "language_code": language,
+    }
+    url = "https://api.scraperapi.com/structured/google/search?" + urlencode(params)
+    data = make_get_request(url)
+    if data.get("error"):
+        raise ProviderRequestError(str(data["error"]))
+    raw_results = data.get("organic_results") or data.get("organic") or data.get("results") or []
+    if isinstance(raw_results, dict):
+        raw_results = raw_results.get("organic_results") or raw_results.get("organic") or []
+    results = [_result_from_item(item, "scraperapi", i) for i, item in enumerate(raw_results[:max_results])]
+    return {
+        "provider": "scraperapi",
+        "query": query,
+        "results": results,
+        "images": [],
+        "answer": results[0]["snippet"] if results else "",
+        "metadata": {"source": "structured/google/search"},
+    }
+
+
+def _map_brightdata_time_range(time_range: Optional[str]) -> Optional[str]:
+    """Map generic recency names to Google's tbs values."""
+    if not time_range:
+        return None
+    return {
+        "hour": "qdr:h",
+        "day": "qdr:d",
+        "week": "qdr:w",
+        "month": "qdr:m",
+        "year": "qdr:y",
+    }.get(time_range, time_range)
+
+
+def search_brightdata(
+    query: str,
+    api_key: str,
+    zone: str,
+    max_results: int = 5,
+    engine: str = "google",
+    country: str = "us",
+    language: str = "en",
+    time_range: Optional[str] = None,
+) -> dict:
+    """Search Bright Data SERP API through its direct REST endpoint.
+
+    The SERP zone must support parsed JSON. ``brd_json=json`` asks Bright Data
+    to return structured results instead of raw search HTML.
+    """
+    engine_hosts = {"google": "www.google.com", "bing": "www.bing.com"}
+    host = engine_hosts.get(engine.lower())
+    if not host:
+        raise ProviderConfigError(f"Unsupported Bright Data search engine: {engine}")
+
+    params = {
+        "q": query,
+        "num": min(max_results, 100),
+        "brd_json": "json",
+    }
+    if country:
+        params["gl"] = country.lower()
+    if language:
+        params["hl"] = language.lower()
+    freshness = _map_brightdata_time_range(time_range)
+    if freshness:
+        params["tbs"] = freshness
+
+    target_url = f"https://{host}/search?{urlencode(params)}"
+    data = make_request(
+        "https://api.brightdata.com/request",
+        {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        },
+        {"zone": zone, "url": target_url, "format": "raw"},
+    )
+    if not isinstance(data, dict):
+        raise ProviderRequestError("Bright Data returned a non-JSON response; enable parsed JSON for the SERP zone.")
+    if data.get("error"):
+        raise ProviderRequestError(str(data["error"]))
+
+    raw_results = data.get("organic_results") or data.get("organic") or data.get("results") or []
+    if isinstance(raw_results, dict):
+        raw_results = raw_results.get("results") or raw_results.get("organic_results") or []
+    results = [_result_from_item(item, "brightdata", i) for i, item in enumerate(raw_results[:max_results])]
+    return {
+        "provider": "brightdata",
+        "query": query,
+        "results": results,
+        "images": [],
+        "answer": results[0]["snippet"] if results else "",
+        "metadata": {"engine": engine, "zone": zone, "source": "api.brightdata.com/request"},
+    }
 
 
 # =============================================================================
@@ -2386,8 +2676,47 @@ def search_searxng(
 # CLI
 # =============================================================================
 
+def _config_path_from_argv(argv: List[str]) -> Optional[str]:
+    for index, value in enumerate(argv):
+        if value == "--config" and index + 1 < len(argv):
+            return argv[index + 1]
+        if value.startswith("--config="):
+            return value.split("=", 1)[1]
+    return None
+
+
+def _explicit_option_value(argv: List[str], *names: str) -> Optional[str]:
+    for index, value in enumerate(argv):
+        if value in names and index + 1 < len(argv):
+            return argv[index + 1]
+        for name in names:
+            if value.startswith(name + "="):
+                return value.split("=", 1)[1]
+    return None
+
+
+def _satellite_argv(argv: List[str]) -> List[str]:
+    """Forward user search flags but never forward local/server control flags."""
+    result: List[str] = []
+    skip_next = False
+    removed_with_value = {"--satellite", "--satellite-token", "--satellite-timeout", "--config", "--server-host", "--server-port", "--server-token"}
+    for value in argv:
+        if skip_next:
+            skip_next = False
+            continue
+        if value in removed_with_value:
+            skip_next = True
+            continue
+        if any(value.startswith(flag + "=") for flag in removed_with_value):
+            continue
+        if value in ("--serve",):
+            continue
+        result.append(value)
+    return result
+
+
 def main():
-    config = load_config()
+    config = load_config(_config_path_from_argv(sys.argv[1:]))
     
     parser = argparse.ArgumentParser(
         description="Web Search Plus — Intelligent multi-provider search with smart auto-routing",
@@ -2411,6 +2740,9 @@ Intelligent Auto-Routing:
   Direct Answer Intent → Perplexity (via Kilo Gateway)
     "what is", "current status", local events, synthesized up-to-date answers
 
+  Additional explicit/fallback providers:
+    Google CSE, SerpApi, ScraperAPI, Bright Data (see docs/providers.md)
+
 Examples:
   web-search-plus -q "iPhone 16 Pro Max price"          # → Serper (shopping)
   web-search-plus -q "how does HTTPS encryption work"   # → Tavily (research)
@@ -2421,10 +2753,34 @@ Full docs: See README.md and SKILL.md
         """,
     )
     
+    # Runtime/configuration arguments
+    parser.add_argument(
+        "--config",
+        dest="config_path",
+        default=str(_default_config_path()),
+        help="Config file (local mode) or central config file (server mode)",
+    )
+    parser.add_argument(
+        "--serve",
+        action="store_true",
+        help="Start the optional central config/search server",
+    )
+    parser.add_argument("--server-host", default=os.environ.get("WSP_SERVER_HOST", "127.0.0.1"))
+    parser.add_argument("--server-port", type=int, default=int(os.environ.get("WSP_SERVER_PORT", "8765")))
+    parser.add_argument("--server-token", default=os.environ.get("WSP_SERVER_TOKEN"), help="Bearer token required by the central server")
+    parser.add_argument(
+        "--satellite",
+        dest="satellite",
+        default=os.environ.get("WSP_SATELLITE_URL"),
+        help="Forward this search to a central server URL instead of using local credentials",
+    )
+    parser.add_argument("--satellite-token", default=os.environ.get("WSP_SATELLITE_TOKEN"), help="Bearer token for the central server")
+    parser.add_argument("--satellite-timeout", type=int, default=30)
+
     # Common arguments
     parser.add_argument(
         "--provider", "-p", 
-        choices=["serper", "tavily", "querit", "exa", "perplexity", "you", "searxng", "auto"],
+        choices=["serper", "tavily", "querit", "exa", "perplexity", "you", "searxng", "google_cse", "serpapi", "scraperapi", "brightdata", "auto"],
         help="Search provider (auto=intelligent routing)"
     )
     parser.add_argument(
@@ -2578,6 +2934,17 @@ Full docs: See README.md and SKILL.md
         help="SearXNG: search categories (general, images, news, videos, etc.)"
     )
     
+    # Additional provider configuration
+    google_cse_config = config.get("google_cse", {})
+    parser.add_argument(
+        "--google-cse-id",
+        default=google_cse_config.get("cx") or os.environ.get("GOOGLE_CSE_ID"),
+        help="Google Programmable Search Engine ID (GOOGLE_CSE_ID)",
+    )
+    serpapi_config = config.get("serpapi", {})
+    scraperapi_config = config.get("scraperapi", {})
+    brightdata_config = config.get("brightdata", {})
+
     # Domain filters
     parser.add_argument("--include-domains", nargs="+")
     parser.add_argument("--exclude-domains", nargs="+")
@@ -2609,7 +2976,38 @@ Full docs: See README.md and SKILL.md
     )
     
     args = parser.parse_args()
-    
+
+    if args.serve:
+        try:
+            from .server import serve
+        except ImportError:
+            from server import serve
+        try:
+            serve(Path(args.config_path), host=args.server_host, port=args.server_port, token=args.server_token)
+        except (OSError, ValueError) as exc:
+            print(json.dumps({"error": str(exc)}, ensure_ascii=False), file=sys.stderr)
+            sys.exit(2)
+        return
+
+    if args.satellite:
+        try:
+            from .server import SatelliteError, satellite_request
+        except ImportError:
+            from server import SatelliteError, satellite_request
+        try:
+            result = satellite_request(
+                args.satellite,
+                _satellite_argv(sys.argv[1:]),
+                token=args.satellite_token,
+                timeout=args.satellite_timeout,
+            )
+        except SatelliteError as exc:
+            print(json.dumps({"error": str(exc)}, ensure_ascii=False), file=sys.stderr)
+            sys.exit(1)
+        indent = None if args.compact else 2
+        print(json.dumps(result, indent=indent, ensure_ascii=False))
+        return
+
     # Handle cache management commands first (before query validation)
     if args.clear_cache:
         result = cache_clear()
@@ -2664,7 +3062,7 @@ Full docs: See README.md and SKILL.md
     
     # Build provider fallback list
     auto_config = config.get("auto_routing", {})
-    provider_priority = auto_config.get("provider_priority", ["tavily", "querit", "exa", "perplexity", "serper", "you", "searxng"])
+    provider_priority = auto_config.get("provider_priority", ["tavily", "querit", "exa", "perplexity", "serper", "you", "searxng", "google_cse", "serpapi", "scraperapi", "brightdata"])
     disabled_providers = auto_config.get("disabled_providers", [])
 
     # Start with the selected provider, then try others in priority order
@@ -2689,8 +3087,17 @@ Full docs: See README.md and SKILL.md
         eligible_providers = providers_to_try[:1]
 
     # Helper function to execute search for a provider
-    def execute_search(prov: str) -> Dict[str, Any]:
-        key = validate_api_key(prov, config)
+    explicit_google_cse_id = _explicit_option_value(sys.argv[1:], "--google-cse-id")
+    explicit_searxng_url = _explicit_option_value(sys.argv[1:], "--searxng-url")
+    explicit_querit_base_url = _explicit_option_value(sys.argv[1:], "--querit-base-url")
+    explicit_querit_base_path = _explicit_option_value(sys.argv[1:], "--querit-base-path")
+
+    def execute_search(prov: str, credential_override: Optional[str] = None) -> Dict[str, Any]:
+        validation_config = dict(config)
+        provider_config = get_provider_config(prov, config)
+        if prov == "google_cse" and explicit_google_cse_id:
+            validation_config["google_cse"] = {**config.get("google_cse", {}), "cx": explicit_google_cse_id}
+        key = validate_api_key(prov, validation_config, key_override=credential_override)
         if prov == "serper":
             return search_serper(
                 query=args.query,
@@ -2724,8 +3131,8 @@ Full docs: See README.md and SKILL.md
                 time_range=args.time_range or args.freshness,
                 include_domains=args.include_domains,
                 exclude_domains=args.exclude_domains,
-                base_url=args.querit_base_url,
-                base_path=args.querit_base_path,
+                base_url=explicit_querit_base_url or provider_config.get("base_url", args.querit_base_url),
+                base_path=explicit_querit_base_path or provider_config.get("base_path", args.querit_base_path),
                 timeout=int(querit_config.get("timeout", 30)),
             )
         elif prov == "exa":
@@ -2748,7 +3155,7 @@ Full docs: See README.md and SKILL.md
                 text_verbosity=args.exa_verbosity,
             )
         elif prov == "perplexity":
-            perplexity_config = config.get("perplexity", {})
+            perplexity_config = get_provider_config("perplexity", config)
             return search_perplexity(
                 query=args.query,
                 api_key=key,
@@ -2769,9 +3176,42 @@ Full docs: See README.md and SKILL.md
                 include_news=not args.no_news,
                 livecrawl=args.livecrawl,
             )
+        elif prov == "google_cse":
+            return search_google_cse(
+                query=args.query,
+                api_key=key,
+                search_engine_id=explicit_google_cse_id or provider_config.get("cx") or os.environ.get("GOOGLE_CSE_ID"),
+                max_results=args.max_results,
+            )
+        elif prov == "serpapi":
+            return search_serpapi(
+                query=args.query,
+                api_key=key,
+                max_results=args.max_results,
+                engine=provider_config.get("engine", serpapi_config.get("engine", "google")),
+            )
+        elif prov == "scraperapi":
+            return search_scraperapi(
+                query=args.query,
+                api_key=key,
+                max_results=args.max_results,
+                country=provider_config.get("country", scraperapi_config.get("country", args.country)),
+                language=provider_config.get("language", scraperapi_config.get("language", args.language)),
+            )
+        elif prov == "brightdata":
+            return search_brightdata(
+                query=args.query,
+                api_key=key,
+                zone=get_brightdata_zone(config),
+                max_results=args.max_results,
+                engine=provider_config.get("engine", brightdata_config.get("engine", "google")),
+                country=provider_config.get("country", brightdata_config.get("country", args.country)),
+                language=provider_config.get("language", brightdata_config.get("language", args.language)),
+                time_range=args.time_range or args.freshness,
+            )
         elif prov == "searxng":
             # For SearXNG, 'key' is actually the instance URL
-            instance_url = args.searxng_url or key
+            instance_url = explicit_searxng_url or provider_config.get("instance_url") or args.searxng_url or key
             if instance_url:
                 instance_url = _validate_searxng_url(instance_url)
             return search_searxng(
@@ -2789,22 +3229,24 @@ Full docs: See README.md and SKILL.md
 
     def execute_with_retry(prov: str) -> Dict[str, Any]:
         last_error = None
-        for attempt in range(0, 3):
-            try:
-                return execute_search(prov)
-            except ProviderRequestError as e:
-                last_error = e
-                if e.status_code in {401, 403}:
+        credentials = get_api_keys(prov, config)
+        # Keep the normal validation error when no credential is configured.
+        credentials = credentials or [None]
+        for credential in credentials:
+            for attempt in range(0, 3):
+                try:
+                    return execute_search(prov, credential)
+                except ProviderRequestError as e:
+                    last_error = e
+                    if e.status_code in {401, 403} or not e.transient:
+                        break
+                    if attempt < 2:
+                        time.sleep(RETRY_BACKOFF_SECONDS[attempt])
+                        continue
                     break
-                if not e.transient:
+                except Exception as e:
+                    last_error = e
                     break
-                if attempt < 2:
-                    time.sleep(RETRY_BACKOFF_SECONDS[attempt])
-                    continue
-                break
-            except Exception as e:
-                last_error = e
-                break
         raise last_error if last_error else Exception("Unknown provider execution error")
 
     cache_context = {
@@ -2908,9 +3350,10 @@ Full docs: See README.md and SKILL.md
         result["routing"] = routing_info
 
         if not cache_hit and not args.no_cache and args.query:
+            cache_provider = successful_provider or provider
             cache_put(
                 query=args.query,
-                provider=successful_provider or provider,
+                provider=cache_provider,
                 max_results=args.max_results,
                 result=result,
                 params=cache_context,

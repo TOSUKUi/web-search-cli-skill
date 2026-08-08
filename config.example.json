@@ -6,7 +6,7 @@
   "auto_routing": {
     "enabled": true,
     "fallback_provider": "serper",
-    "provider_priority": ["tavily", "querit", "exa", "perplexity", "serper", "you", "searxng"],
+    "provider_priority": ["tavily", "querit", "exa", "perplexity", "serper", "you", "searxng", "google_cse", "serpapi", "scraperapi", "brightdata"],
     "disabled_providers": [],
     "confidence_threshold": 0.3
   },
@@ -41,6 +41,22 @@
     "instance_url": null,
     "safesearch": 0,
     "engines": null,
+    "language": "en"
+  },
+  "google_cse": {
+    "cx": null
+  },
+  "serpapi": {
+    "engine": "google"
+  },
+  "scraperapi": {
+    "country": "us",
+    "language": "en"
+  },
+  "brightdata": {
+    "zone": null,
+    "engine": "google",
+    "country": "us",
     "language": "en"
   }
 }
