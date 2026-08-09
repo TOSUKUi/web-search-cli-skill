@@ -21,6 +21,14 @@ pip install -e .
 web-search-plus --query "LLM scaling laws research" --provider auto --max-results 5
 ```
 
+To install the latest version directly from GitHub without a checkout:
+
+```bash
+pip install git+https://github.com/TOSUKUi/web-search-cli-skill
+```
+
+When installing without a checkout, provide credentials through process environment variables or an explicit `--config PATH`; the repository `.env.example` is available in the GitHub repository.
+
 The installed CLI is provided by the `web-search-plus` console script in `pyproject.toml`.
 
 If `web-search-plus` is not found after installation, the pip scripts directory is not on `PATH`. Add that scripts directory to `PATH`, then rerun the same `web-search-plus ...` command.

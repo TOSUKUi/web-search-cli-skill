@@ -21,6 +21,14 @@ pip install -e .
 web-search-plus --query "LLM scaling laws research" --provider auto --max-results 5
 ```
 
+チェックアウトせずにGitHubから最新版を直接インストールする場合は、次を実行します。
+
+```bash
+pip install git+https://github.com/TOSUKUi/web-search-cli-skill
+```
+
+チェックアウトせずにインストールする場合は、認証情報をプロセスの環境変数または明示的な`--config PATH`で指定してください。`.env.example`はGitHubリポジトリにあります。
+
 インストールされるCLIは、`pyproject.toml`の`web-search-plus` console scriptです。
 
 ## Docker Composeによる中央サーバー
