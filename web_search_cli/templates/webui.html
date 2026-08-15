@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Web Search Plus — プロバイダー残量</title>
+<style>
+  :root {
+    --bg: #f6f7f9;
+    --surface: #ffffff;
+    --border: #e3e6ea;
+    --text: #1c2430;
+    --muted: #6b7280;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+    --green: #16a34a;
+    --green-bg: #f0fdf4;
+    --amber: #b45309;
+    --amber-bg: #fffbeb;
+    --red: #dc2626;
+    --red-bg: #fef2f2;
+    --gray-bg: #f1f3f5;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Hiragino Sans", "Noto Sans JP", sans-serif;
+    font-size: 15px;
+    line-height: 1.55;
+  }
+  .wrap { max-width: 880px; margin: 0 auto; padding: 32px 20px 64px; }
+  header { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 20px; }
+  h1 { font-size: 20px; margin: 0; font-weight: 650; letter-spacing: -0.01em; }
+  .sub { color: var(--muted); font-size: 13px; }
+  .toolbar { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; }
+  .btn {
+    appearance: none;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--text);
+    font: inherit;
+    font-size: 13px;
+    padding: 6px 14px;
+    border-radius: 8px;
+    cursor: pointer;
+  }
+  .btn:hover { border-color: #c9cfd6; }
+  .btn:disabled { opacity: 0.55; cursor: default; }
+  #updated { color: var(--muted); font-size: 12px; }
+  #msg { font-size: 13px; color: var(--muted); min-height: 1.2em; }
+
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 12px; }
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 14px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .card-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+  .card-name { font-weight: 600; font-size: 14px; }
+  .badge {
+    font-size: 11px;
+    font-weight: 600;
+    padding: 2px 8px;
+    border-radius: 999px;
+    white-space: nowrap;
+  }
+  .badge.ok { background: var(--green-bg); color: var(--green); }
+  .badge.miss { background: var(--red-bg); color: var(--red); }
+  .badge.api { background: var(--gray-bg); color: var(--muted); }
+  .card-sub { color: var(--muted); font-size: 12px; }
+  .card-keys { color: var(--muted); font-size: 12px; font-family: var(--mono); }
+
+  .quota { display: flex; flex-direction: column; gap: 6px; }
+  .quota-nums {
+    display: flex; justify-content: space-between; align-items: baseline;
+    font-variant-numeric: tabular-nums;
+  }
+  .quota-left { font-size: 22px; font-weight: 700; font-family: var(--mono); letter-spacing: -0.02em; }
+  .quota-left small { font-size: 12px; color: var(--muted); font-weight: 500; font-family: inherit; }
+  .quota-used { color: var(--muted); font-size: 12px; }
+  .bar { height: 6px; border-radius: 999px; background: #e9edf1; overflow: hidden; }
+  .bar > i {
+    display: block; height: 100%; border-radius: 999px;
+    background: var(--green);
+  }
+  .bar > i.warn { background: var(--amber); }
+  .bar > i.danger { background: var(--red); }
+  .quota-meta { color: var(--muted); font-size: 11px; }
+  .quota-fail { color: var(--muted); font-size: 12px; }
+  .card-actions { display: flex; align-items: center; gap: 8px; margin-top: auto; }
+  .card-actions .spacer { flex: 1; }
+  .retry {
+    appearance: none;
+    border: none;
+    background: none;
+    color: var(--muted);
+    font: inherit;
+    font-size: 12px;
+    cursor: pointer;
+    padding: 2px 4px;
+    border-radius: 6px;
+  }
+  .retry:hover { color: var(--text); background: var(--gray-bg); }
+  .retry:disabled { opacity: 0.5; cursor: default; }
+  a.dash { font-size: 12px; color: #2563eb; text-decoration: none; }
+  a.dash:hover { text-decoration: underline; }
+
+  .note { color: var(--muted); font-size: 12px; margin-top: 20px; }
+  .note code { font-family: var(--mono); font-size: 11px; background: var(--gray-bg); padding: 1px 5px; border-radius: 4px; }
+  .spinner {
+    display: inline-block; width: 11px; height: 11px;
+    border: 2px solid var(--border); border-top-color: var(--muted);
+    border-radius: 50%; animation: spin 0.7s linear infinite; vertical-align: -1px;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  @media (max-width: 560px) {
+    .grid { grid-template-columns: 1fr; }
+    .wrap { padding: 20px 14px 48px; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Web Search Plus — プロバイダー残量</h1>
+    <span class="sub" id="sub"></span>
+  </header>
+
+  <div class="toolbar">
+    <button class="btn" id="refresh">更新</button>
+    <span id="updated"></span>
+  </div>
+  <div id="msg"></div>
+
+  <div class="grid" id="grid"></div>
+
+  <p class="note">
+    残量は各プロバイダーの公式 API を直接参照しています(読み取りのみ・検索は消費しません)。
+    カードの <b>再取得</b> で個別に更新できます。残量 API のないプロバイダーはダッシュボードで確認してください。
+  </p>
+</div>
+
+<script>
+"use strict";
+const PROVIDER_LABELS = {
+  serper: "Serper", tavily: "Tavily", querit: "Querit", exa: "Exa",
+  perplexity: "Perplexity (Kilo)", you: "You.com", searxng: "SearXNG",
+  google_cse: "Google CSE", serpapi: "SerpApi", scraperapi: "ScraperAPI",
+  brightdata: "Bright Data",
+};
+
+const state = { data: null, refreshing: false };
+
+function el(tag, cls, text) {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (text !== undefined) e.textContent = text;
+  return e;
+}
+
+function fmtTime(ts) {
+  try {
+    return new Date(ts * 1000).toLocaleString("ja-JP");
+  } catch (_) {
+    return "";
+  }
+}
+
+function fmtNum(n) {
+  if (n === null || n === undefined) return "—";
+  return Number(n).toLocaleString("ja-JP");
+}
+
+function pct(quota) {
+  if (!quota || quota.limit === null || quota.limit === undefined || quota.limit <= 0) return null;
+  const used = quota.used !== null && quota.used !== undefined ? quota.used : 0;
+  return Math.max(0, Math.min(100, (used / quota.limit) * 100));
+}
+
+function barClass(p) {
+  if (p === null) return "";
+  if (p >= 90) return "danger";
+  if (p >= 70) return "warn";
+  return "";
+}
+
+function quotaNums(quota) {
+  if (quota.left !== null && quota.left !== undefined) {
+    const over = quota.left < 0;
+    return {
+      main: over ? 0 : quota.left,
+      mainUnit: over ? "超過" : "残り",
+      sub: quota.limit !== null && quota.limit !== undefined
+        ? `使用 ${fmtNum(quota.used)} / 上限 ${fmtNum(quota.limit)}`
+        : `使用 ${fmtNum(quota.used)}`,
+    };
+  }
+  return {
+    main: quota.used,
+    mainUnit: "使用",
+    sub: quota.limit !== null && quota.limit !== undefined ? `上限 ${fmtNum(quota.limit)}` : "",
+  };
+}
+
+function cardFor(prov) {
+  const card = el("div", "card");
+  const name = PROVIDER_LABELS[prov.id] || prov.name || prov.id;
+
+  // Head: name + badge
+  const head = el("div", "card-head");
+  head.appendChild(el("span", "card-name", name));
+  let badge;
+  if (!prov.configured) {
+    badge = el("span", "badge miss", "未設定");
+  } else if (prov.has_quota_api && prov.quota) {
+    badge = el("span", "badge ok", "残量取得OK");
+  } else if (prov.has_quota_api) {
+    badge = el("span", "badge miss", "取得失敗");
+  } else {
+    badge = el("span", "badge api", "残量APIなし");
+  }
+  head.appendChild(badge);
+  card.appendChild(head);
+
+  // Sub line: key count / dashboard
+  const subBits = [];
+  if (prov.configured) {
+    subBits.push(prov.id === "searxng" ? "インスタンス設定済み" : `キー ${prov.key_count} 件`);
+  }
+  if (prov.dashboard) {
+    subBits.push(`<a class="dash" href="${prov.dashboard}" target="_blank" rel="noopener">ダッシュボード ↗</a>`);
+  }
+  const sub = el("div", "card-sub");
+  sub.innerHTML = subBits.join(" ・ ");
+  card.appendChild(sub);
+
+  // Quota body
+  if (prov.has_quota_api) {
+    const body = el("div", "quota");
+    if (prov.quota) {
+      const nums = quotaNums(prov.quota);
+      const row = el("div", "quota-nums");
+      const left = el("span", "quota-left", fmtNum(nums.main));
+      left.appendChild(el("small", "", " " + nums.mainUnit));
+      row.appendChild(left);
+      if (nums.sub) row.appendChild(el("span", "quota-used", nums.sub));
+      body.appendChild(row);
+
+      const p = pct(prov.quota);
+      if (p !== null) {
+        const bar = el("div", "bar");
+        bar.appendChild(el("i", barClass(p), ""));
+        bar.firstChild.style.width = p.toFixed(1) + "%";
+        body.appendChild(bar);
+      }
+
+      const metaBits = [];
+      if (prov.quota.reset) {
+        metaBits.push("リセット: " + prov.quota.reset.slice(0, 10));
+      }
+      metaBits.push("取得 " + fmtTime(prov.quota.fetched_at));
+      body.appendChild(el("div", "quota-meta", metaBits.join(" ・ ")));
+    } else {
+      body.appendChild(el("div", "quota-fail", "残量の取得に失敗しました"));
+    }
+    card.appendChild(body);
+  }
+
+  // Actions: retry (quota providers only)
+  const actions = el("div", "card-actions");
+  if (prov.has_quota_api) {
+    const retry = el("button", "retry", "再取得");
+    retry.addEventListener("click", () => refreshOne(prov.id, retry));
+    actions.appendChild(retry);
+  }
+  actions.appendChild(el("span", "spacer"));
+  card.appendChild(actions);
+
+  return card;
+}
+
+function render() {
+  const grid = document.getElementById("grid");
+  grid.textContent = "";
+  for (const prov of state.data.providers) {
+    grid.appendChild(cardFor(prov));
+  }
+  document.getElementById("sub").textContent =
+    `${state.data.configured_count}/${state.data.total} プロバイダー設定済み`;
+  document.getElementById("updated").textContent =
+    "最終更新 " + fmtTime(state.data.generated_at);
+}
+
+async function fetchStatus() {
+  state.refreshing = true;
+  const btn = document.getElementById("refresh");
+  const msg = document.getElementById("msg");
+  btn.disabled = true;
+  msg.innerHTML = '<span class="spinner"></span> 残量を確認中…';
+  try {
+    const res = await fetch("/api/status", { cache: "no-store" });
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    state.data = await res.json();
+    render();
+    msg.textContent = "";
+  } catch (e) {
+    msg.textContent = "更新に失敗しました: " + e.message;
+  } finally {
+    btn.disabled = false;
+    state.refreshing = false;
+  }
+}
+
+async function refreshOne(id, btn) {
+  if (state.refreshing) return;
+  state.refreshing = true;
+  btn.disabled = true;
+  btn.textContent = "…";
+  try {
+    const res = await fetch("/api/status", { cache: "no-store" });
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    state.data = await res.json();
+    render();
+  } catch (e) {
+    document.getElementById("msg").textContent = "更新に失敗しました: " + e.message;
+    btn.disabled = false;
+    btn.textContent = "再取得";
+    state.refreshing = false;
+  }
+}
+
+document.getElementById("refresh").addEventListener("click", fetchStatus);
+fetchStatus();
+</script>
+</body>
+</html>

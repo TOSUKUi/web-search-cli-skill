@@ -31,6 +31,27 @@ pip install git+https://github.com/TOSUKUi/web-search-cli-skill
 
 インストールされるCLIは、`pyproject.toml`の`web-search-plus` console scriptです。
 
+## 残量ダッシュボード（Web UI）
+
+どのプロバイダーのAPIキーが設定済みで、残量がどれだけ残っているかをブラウザで確認できます。
+
+```bash
+python -m web_search_cli.webui --port 8901   # その後 http://127.0.0.1:8901/ を開く
+```
+
+`--open`でデフォルトブラウザを自動で開きます。`WSP_WEBUI_PORT`・`WSP_WEBUI_HOST`で既定値を変更できます。
+
+ページはCLIと同じconfig/envの読み込み経路で認証情報を確認し、各プロバイダーの公式使用量APIを直接参照します（読み取りのみで検索は消費しません）。
+
+| プロバイダー | 残量API |
+| --- | --- |
+| Tavily | `GET /usage` — プランの使用量/上限 |
+| SerpApi | `GET /account.json` — 残り検索数・月次リセット日 |
+| ScraperAPI | `GET /account` — 残りクレジット・請求リセット日 |
+| Serper、Exa、Querit、You.com、Perplexity、Google CSE、Bright Data、SearXNG | 公開の使用量APIなし — カードに設定有無とダッシュボードリンクを表示 |
+
+ページとAPIは認証情報の値そのものを一切公開しません（設定有無と件数のみ）。
+
 ## Docker Composeによる中央サーバー
 
 `docker-compose.yml`で、APIキーと設定ファイルをイメージに含めず中央サーバーを起動できます。

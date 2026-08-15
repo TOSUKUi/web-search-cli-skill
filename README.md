@@ -33,6 +33,27 @@ The installed CLI is provided by the `web-search-plus` console script in `pyproj
 
 If `web-search-plus` is not found after installation, the pip scripts directory is not on `PATH`. Add that scripts directory to `PATH`, then rerun the same `web-search-plus ...` command.
 
+## Quota dashboard (Web UI)
+
+Check which provider API keys are configured and how much quota remains in a browser:
+
+```bash
+python -m web_search_cli.webui --port 8901   # then open http://127.0.0.1:8901/
+```
+
+`--open` opens the dashboard in the default browser. `WSP_WEBUI_PORT` and `WSP_WEBUI_HOST` set the defaults.
+
+The page reads credentials through the same config/env code path as the CLI and queries each provider's official usage endpoint (read-only; no searches are consumed):
+
+| Provider | Remaining-quota API |
+| --- | --- |
+| Tavily | `GET /usage` — plan credits used/limit |
+| SerpApi | `GET /account.json` — searches left, monthly reset |
+| ScraperAPI | `GET /account` — credits left, billing reset |
+| Serper, Exa, Querit, You.com, Perplexity, Google CSE, Bright Data, SearXNG | No public usage API — the card shows configured/not configured with a dashboard link |
+
+Credential values are never exposed by the page or its endpoints; only presence and counts.
+
 ## Docker Compose central server
 
 The included `docker-compose.yml` starts the central server with the API keys and config kept outside the image:
