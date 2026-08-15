@@ -206,3 +206,45 @@ class UsageLogTests(unittest.TestCase):
             entry = log.call_args[0][0]
             self.assertEqual(entry["provider"], "exa")
             self.assertEqual(entry["cost_usd"], 0.007)
+
+
+class BrightDataRoutingTests(unittest.TestCase):
+    def test_brightdata_auto_routed_for_shopping(self):
+        from web_search_cli import search
+        config = {
+            "serper": {"api_key": "serper-key-123456"},
+            "brightdata": {"api_key": "brightdata-key-123456", "zone": "serp_zone1"},
+            "auto_routing": {
+                "provider_priority": ["tavily", "querit", "exa", "perplexity", "brightdata", "serper", "you", "searxng"],
+            },
+        }
+        with patch.object(search, "get_brightdata_zone", return_value="serp_zone1"):
+            r = search.auto_route_provider("iPhone 16 Pro price comparison", config)
+        self.assertEqual(r["provider"], "brightdata")
+
+    def test_brightdata_not_available_without_zone(self):
+        from web_search_cli import search
+        config = {
+            "serper": {"api_key": "serper-key-123456"},
+            "brightdata": {"api_key": "brightdata-key-123456"},
+            "auto_routing": {
+                "provider_priority": ["brightdata", "serper"],
+            },
+        }
+        with patch.object(search, "get_brightdata_zone", return_value=None):
+            r = search.auto_route_provider("iPhone 16 Pro price", config)
+        self.assertEqual(r["provider"], "serper")
+
+    def test_brightdata_tie_breaks_by_priority(self):
+        from web_search_cli import search
+        config = {
+            "serper": {"api_key": "serper-key-123456"},
+            "brightdata": {"api_key": "brightdata-key-123456", "zone": "serp_zone1"},
+            "auto_routing": {
+                # serper first: tie should go to serper
+                "provider_priority": ["serper", "brightdata"],
+            },
+        }
+        with patch.object(search, "get_brightdata_zone", return_value="serp_zone1"):
+            r = search.auto_route_provider("iPhone 16 price", config)
+        self.assertEqual(r["provider"], "serper")

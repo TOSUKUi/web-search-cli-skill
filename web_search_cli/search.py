@@ -278,7 +278,7 @@ DEFAULT_CONFIG = {
     "auto_routing": {
         "enabled": True,
         "fallback_provider": "serper",
-        "provider_priority": ["tavily", "querit", "exa", "perplexity", "serper", "you", "searxng", "google_cse", "serpapi", "scraperapi", "brightdata"],
+        "provider_priority": ["tavily", "querit", "exa", "perplexity", "brightdata", "serper", "you", "searxng", "google_cse", "serpapi", "scraperapi"],
         "disabled_providers": [],
         "confidence_threshold": 0.3,  # Below this, note low confidence
     },
@@ -1243,6 +1243,7 @@ class QueryAnalyzer:
         # Map intents to providers with final scores
         provider_scores = {
             "serper": shopping_score + local_news_score + (recency_score * 0.35),
+            "brightdata": shopping_score + local_news_score + (recency_score * 0.35),  # Same Google-SERP scoring; ties go to priority order
             "tavily": research_score + (complexity["complexity_score"] if not complexity["is_complex"] else 0) + (0.2 * recency_score),
             "querit": (research_score * 0.65) + (rag_score * 0.35) + (recency_score * 0.45),
             "exa": discovery_score + (1.0 if re.search(r"\b(similar|alternatives?|examples?)\b", query, re.IGNORECASE) else 0.0) + (exa_deep_score * 0.5) + (exa_deep_reasoning_score * 0.5),
@@ -1254,6 +1255,7 @@ class QueryAnalyzer:
         # Build match details per provider
         provider_matches = {
             "serper": shopping_matches + local_news_matches,
+            "brightdata": shopping_matches + local_news_matches,
             "tavily": research_matches,
             "querit": research_matches,
             "exa": discovery_matches + exa_deep_matches + exa_deep_reasoning_matches,
@@ -1286,6 +1288,7 @@ class QueryAnalyzer:
         available = {
             p: s for p, s in scores.items()
             if p not in disabled and get_api_key(p, self.config)
+            and (p != "brightdata" or bool(get_brightdata_zone(self.config)))
         }
         
         if not available:
@@ -3183,7 +3186,7 @@ Full docs: See README.md and SKILL.md
     
     # Build provider fallback list
     auto_config = config.get("auto_routing", {})
-    provider_priority = auto_config.get("provider_priority", ["tavily", "querit", "exa", "perplexity", "serper", "you", "searxng", "google_cse", "serpapi", "scraperapi", "brightdata"])
+    provider_priority = auto_config.get("provider_priority", ["tavily", "querit", "exa", "perplexity", "brightdata", "serper", "you", "searxng", "google_cse", "serpapi", "scraperapi"])
     disabled_providers = auto_config.get("disabled_providers", [])
 
     # Start with the selected provider, then try others in priority order

@@ -6,7 +6,19 @@
   "auto_routing": {
     "enabled": true,
     "fallback_provider": "serper",
-    "provider_priority": ["tavily", "querit", "exa", "perplexity", "serper", "you", "searxng", "google_cse", "serpapi", "scraperapi", "brightdata"],
+    "provider_priority": [
+      "tavily",
+      "querit",
+      "exa",
+      "perplexity",
+      "brightdata",
+      "serper",
+      "you",
+      "searxng",
+      "google_cse",
+      "serpapi",
+      "scraperapi"
+    ],
     "disabled_providers": [],
     "confidence_threshold": 0.3
   },

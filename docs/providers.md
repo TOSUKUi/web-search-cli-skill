@@ -15,8 +15,10 @@ SERP products may charge by result, rendering mode, or successful request.
 | [Bright Data SERP API](https://brightdata.com/pricing/serp) | **5,000 free records/month** | Google/Bing SERP scraping via direct REST API | `BRIGHTDATA_API_KEY` + `BRIGHTDATA_SERP_ZONE`, `--provider brightdata` |
 
 The four providers above return the CLI’s normalized JSON result shape. They are
-explicit/fallback providers rather than new intent-routing targets, so existing
-auto-routing behavior is preserved.
+available as explicit (`--provider`) and fallback providers. Bright Data is also
+an auto-routing target (Google-SERP scoring, same as Serper; ties are broken by
+provider priority so the larger free allowance is used first). The other three
+are not intent-routing targets; existing auto-routing behavior is preserved.
 
 For ScraperAPI, the official billing documentation distinguishes the recurring
 free plan from the trial: 1,000 API credits are provided each month, while the
