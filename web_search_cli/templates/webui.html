@@ -112,6 +112,24 @@
 
   .note { color: var(--muted); font-size: 12px; margin-top: 20px; }
   .note code { font-family: var(--mono); font-size: 11px; background: var(--gray-bg); padding: 1px 5px; border-radius: 4px; }
+
+  .usage-section { margin-top: 28px; }
+  .usage-section h2 { font-size: 15px; margin: 0 0 6px; font-weight: 650; }
+  .usage-table {
+    width: 100%; border-collapse: collapse; margin-top: 10px;
+    background: var(--surface); border: 1px solid var(--border); border-radius: 12px; overflow: hidden;
+    font-size: 13px;
+  }
+  .usage-table th, .usage-table td {
+    text-align: left; padding: 8px 12px; border-bottom: 1px solid var(--border);
+    font-variant-numeric: tabular-nums;
+  }
+  .usage-table th { background: var(--gray-bg); font-weight: 600; font-size: 12px; color: var(--muted); }
+  .usage-table td:first-child { font-weight: 600; }
+  .usage-table tr:last-child td { border-bottom: none; }
+  .usage-table .mono { font-family: var(--mono); font-size: 12px; }
+  .usage-table .hdr { font-family: var(--mono); font-size: 11px; color: var(--muted); word-break: break-all; }
+  .usage-table .num { text-align: right; }
   .spinner {
     display: inline-block; width: 11px; height: 11px;
     border: 2px solid var(--border); border-top-color: var(--muted);
@@ -139,6 +157,17 @@
   <div id="msg"></div>
 
   <div class="grid" id="grid"></div>
+
+  <div class="usage-section" id="usage-section" hidden>
+    <h2>使用状況ログ（CLI 検索履歴）</h2>
+    <p class="note">CLI で検索した際の実績を記録しています。Exa は応答に含まれる <code>costDollars</code> からコストを記録（無料枠は月 $10 相当）。ヘッダーに残量情報があれば自動で捕捉します。</p>
+    <table class="usage-table">
+      <thead>
+        <tr><th>プロバイダー</th><th>検索回数</th><th>コスト (USD)</th><th>捕捉ヘッダー</th><th>最終利用</th></tr>
+      </thead>
+      <tbody id="usage-body"></tbody>
+    </table>
+  </div>
 
   <p class="note">
     残量は各プロバイダーの公式 API を直接参照しています(読み取りのみ・検索は消費しません)。
@@ -291,10 +320,39 @@ function render() {
   for (const prov of state.data.providers) {
     grid.appendChild(cardFor(prov));
   }
+  renderUsage();
   document.getElementById("sub").textContent =
     `${state.data.configured_count}/${state.data.total} プロバイダー設定済み`;
   document.getElementById("updated").textContent =
     "最終更新 " + fmtTime(state.data.generated_at);
+}
+
+function renderUsage() {
+  const usage = (state.data.usage && state.data.usage.providers) || {};
+  const keys = Object.keys(usage);
+  const section = document.getElementById("usage-section");
+  const body = document.getElementById("usage-body");
+  if (!keys.length) {
+    section.hidden = true;
+    return;
+  }
+  section.hidden = false;
+  body.textContent = "";
+  const nameOf = id => PROVIDER_LABELS[id] || id;
+  for (const id of keys.sort()) {
+    const u = usage[id];
+    const tr = el("tr");
+    tr.appendChild(el("td", "", nameOf(id)));
+    tr.appendChild(el("td", "num", fmtNum(u.count)));
+    tr.appendChild(el("td", "num mono", u.cost_usd > 0 ? "$" + u.cost_usd.toFixed(3) : "—"));
+    const hdrKeys = Object.keys(u.headers_seen || {});
+    const hdrTd = el("td", "", hdrKeys.length
+      ? hdrKeys.map(k => `<span class="hdr">${k}=${(u.headers_seen[k] || "").slice(0, 40)}</span>`).join("<br>")
+      : "—");
+    tr.appendChild(hdrTd);
+    tr.appendChild(el("td", "", u.last_ts ? fmtTime(u.last_ts) : "—"));
+    body.appendChild(tr);
+  }
 }
 
 async function fetchStatus() {

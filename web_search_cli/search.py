@@ -1576,6 +1576,104 @@ def deduplicate_results_across_providers(results_by_provider: List[Tuple[str, Di
 # HTTP Client
 # =============================================================================
 
+# =============================================================================
+# Usage logging (quota tracking)
+# =============================================================================
+
+USAGE_LOG_FILE = CACHE_DIR / "usage.jsonl"
+
+# Header markers that may carry remaining-quota info (future-proofing).
+# Providers do not consistently send these today; when one appears it is
+# logged automatically via _capture_response_headers.
+QUOTA_HEADER_MARKERS = (
+    "remaining", "ratelimit", "rate-limit", "quota", "credit", "usage",
+)
+
+
+def log_usage_entry(entry: Dict[str, Any]) -> None:
+    """Append one usage record to the append-only usage log (best-effort)."""
+    try:
+        _ensure_cache_dir()
+        with open(USAGE_LOG_FILE, "a", encoding="utf-8") as f:
+            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    except (IOError, OSError):
+        pass  # Non-fatal: quota logging must never break a search.
+
+
+def read_usage_log(limit: Optional[int] = None) -> List[Dict[str, Any]]:
+    """Read the usage log, newest first. Returns [] when absent/corrupt."""
+    if not USAGE_LOG_FILE.exists():
+        return []
+    entries: List[Dict[str, Any]] = []
+    try:
+        with open(USAGE_LOG_FILE, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    entries.append(json.loads(line))
+                except json.JSONDecodeError:
+                    continue
+    except (IOError, OSError):
+        return []
+    entries.sort(key=lambda e: e.get("ts", 0), reverse=True)
+    if limit:
+        entries = entries[:limit]
+    return entries
+
+
+def usage_summary() -> Dict[str, Any]:
+    """Aggregate the usage log per provider (counts, cost, last seen)."""
+    entries = read_usage_log()
+    summary: Dict[str, Any] = {"total_entries": len(entries), "providers": {}}
+    for entry in entries:
+        provider = entry.get("provider", "unknown")
+        prov = summary["providers"].setdefault(provider, {
+            "count": 0,
+            "cost_usd": 0.0,
+            "last_ts": None,
+            "headers_seen": {},
+        })
+        prov["count"] += 1
+        cost = entry.get("cost_usd")
+        if isinstance(cost, (int, float)):
+            prov["cost_usd"] += cost
+        ts = entry.get("ts")
+        if ts and (prov["last_ts"] is None or ts > prov["last_ts"]):
+            prov["last_ts"] = ts
+        for name, value in (entry.get("headers") or {}).items():
+            prov["headers_seen"].setdefault(name, value)
+    return summary
+
+
+def _capture_response_headers(response) -> Dict[str, str]:
+    """Extract quota/rate-limit headers from an HTTP response, if present.
+
+    Returns a dict of lower-cased header names to values for headers that look
+    like rate/usage indicators. Providers do not consistently expose these
+    today, but when one does, the value is preserved on the parsed result as
+    ``_headers`` and logged.
+    """
+    interesting: Dict[str, str] = {}
+    try:
+        headers = response.headers
+    except AttributeError:
+        return interesting
+    for name, value in headers.items():
+        lower = (name or "").lower()
+        if any(marker in lower for marker in QUOTA_HEADER_MARKERS):
+            interesting[lower] = str(value)[:200]
+    return interesting
+
+
+def _attach_response_headers(result, response) -> None:
+    """Attach captured rate/quota headers to a parsed result dict in place."""
+    headers = _capture_response_headers(response)
+    if headers:
+        result.setdefault("_headers", {}).update(headers)
+
+
 def make_request(url: str, headers: dict, body: dict, timeout: int = 30) -> dict:
     """Make HTTP POST request and return JSON response."""
     # Ensure User-Agent is set (required by some APIs like Exa/Cloudflare)
@@ -1586,7 +1684,9 @@ def make_request(url: str, headers: dict, body: dict, timeout: int = 30) -> dict
     
     try:
         with urlopen(req, timeout=timeout) as response:
-            return json.loads(response.read().decode("utf-8"))
+            result = json.loads(response.read().decode("utf-8"))
+            _attach_response_headers(result, response)
+            return result
     except HTTPError as e:
         error_body = e.read().decode("utf-8") if e.fp else str(e)
         try:
@@ -1626,7 +1726,9 @@ def make_get_request(url: str, headers: Optional[dict] = None, timeout: int = 30
     req = Request(url, headers=request_headers, method="GET")
     try:
         with urlopen(req, timeout=timeout) as response:
-            return json.loads(response.read().decode("utf-8"))
+            result = json.loads(response.read().decode("utf-8"))
+            _attach_response_headers(result, response)
+            return result
     except HTTPError as e:
         error_body = e.read().decode("utf-8") if e.fp else str(e)
         try:
@@ -2168,6 +2270,25 @@ def search_exa(
 
     timeout = 55 if is_deep else 30
     data = make_request(endpoint, headers, body, timeout=timeout)
+
+    # Exa reports per-request cost in the response body (costDollars). Log it
+    # so the Web UI can estimate remaining free credits (see usage log).
+    cost_dollars = data.get("costDollars")
+    cost_usd = None
+    if isinstance(cost_dollars, dict):
+        total = cost_dollars.get("total")
+        if isinstance(total, (int, float)):
+            cost_usd = round(float(total), 6)
+    if cost_usd is not None:
+        log_usage_entry({
+            "ts": time.time(),
+            "provider": "exa",
+            "event": "search",
+            "exa_depth": exa_depth,
+            "query": (query or similar_url or "")[:200],
+            "cost_usd": cost_usd,
+            "headers": data.get("_headers") or {},
+        })
 
     results = []
 
@@ -3364,6 +3485,24 @@ Full docs: See README.md and SKILL.md
             result["deduplicated"] = False
             result.setdefault("metadata", {})
             result["metadata"].setdefault("dedup_count", 0)
+
+        # Record usage for quota tracking (best-effort, non-fatal).
+        # Exa already logs costDollars inside search_exa; every successful
+        # provider also records a lightweight entry here. Cost is only known
+        # when the provider reported it (currently Exa).
+        try:
+            log_usage_entry({
+                "ts": time.time(),
+                "provider": successful_provider or provider,
+                "event": "search",
+                "query": (args.query or "")[:200],
+                "max_results": args.max_results,
+                "cached": bool(cache_hit),
+                "cost_usd": None,
+                "headers": result.get("_headers") or {},
+            })
+        except Exception:
+            pass  # Quota logging must never break a search.
 
         indent = None if args.compact else 2
         print(json.dumps(result, indent=indent, ensure_ascii=False))

@@ -136,3 +136,73 @@ class BuildStatusTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class UsageLogTests(unittest.TestCase):
+    def test_log_and_read_usage(self):
+        import tempfile
+        from web_search_cli import search
+        with tempfile.TemporaryDirectory() as tmp:
+            old = search.USAGE_LOG_FILE
+            search.USAGE_LOG_FILE = __import__("pathlib").Path(tmp) / "usage.jsonl"
+            try:
+                search.log_usage_entry({"ts": 100.0, "provider": "exa", "event": "search", "cost_usd": 0.007})
+                search.log_usage_entry({"ts": 200.0, "provider": "serper", "event": "search", "cost_usd": None})
+                entries = search.read_usage_log()
+                self.assertEqual(len(entries), 2)
+                self.assertEqual(entries[0]["provider"], "serper")  # newest first
+                summary = search.usage_summary()
+                self.assertEqual(summary["providers"]["exa"]["count"], 1)
+                self.assertEqual(summary["providers"]["exa"]["cost_usd"], 0.007)
+                self.assertEqual(summary["providers"]["serper"]["count"], 1)
+                # corrupt lines are skipped
+                with open(search.USAGE_LOG_FILE, "a", encoding="utf-8") as f:
+                    f.write("not-json\n")
+                self.assertEqual(len(search.read_usage_log()), 2)
+            finally:
+                search.USAGE_LOG_FILE = old
+
+    def test_usage_summary_empty(self):
+        import tempfile
+        from web_search_cli import search
+        with tempfile.TemporaryDirectory() as tmp:
+            old = search.USAGE_LOG_FILE
+            search.USAGE_LOG_FILE = __import__("pathlib").Path(tmp) / "usage.jsonl"
+            try:
+                self.assertEqual(search.usage_summary()["total_entries"], 0)
+            finally:
+                search.USAGE_LOG_FILE = old
+
+    def test_capture_response_headers(self):
+        from web_search_cli import search
+        class FakeHeaders(dict):
+            def items(self):
+                return self._items
+        class FakeResponse:
+            def __init__(self, items):
+                self.headers = FakeHeaders()
+                self.headers._items = items
+        resp = FakeResponse([
+            ("X-RateLimit-Remaining", "42"),
+            ("Content-Type", "application/json"),
+            ("X-Quota-Limit", "1000"),
+        ])
+        captured = search._capture_response_headers(resp)
+        self.assertIn("x-ratelimit-remaining", captured)
+        self.assertEqual(captured["x-ratelimit-remaining"], "42")
+        self.assertIn("x-quota-limit", captured)
+        self.assertNotIn("content-type", captured)
+
+    def test_exa_cost_logging(self):
+        from web_search_cli import search
+        with patch.object(search, "make_request") as mr, \
+             patch.object(search, "log_usage_entry") as log:
+            mr.return_value = {
+                "costDollars": {"total": 0.007, "search": {"neural": 0.007}},
+                "results": [{"title": "T", "url": "https://example.com", "text": "x"}],
+            }
+            search.search_exa("test", "exa-key-123", max_results=1)
+            log.assert_called_once()
+            entry = log.call_args[0][0]
+            self.assertEqual(entry["provider"], "exa")
+            self.assertEqual(entry["cost_usd"], 0.007)

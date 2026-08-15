@@ -41,6 +41,7 @@ from .search import (
     get_provider_config,
     get_searxng_instance_url,
     load_config,
+    usage_summary,
 )
 
 # Provider -> usage endpoint description. Each entry knows how to authenticate
@@ -245,6 +246,7 @@ def build_status(config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         "providers": providers,
         "configured_count": sum(1 for p in providers if p["configured"]),
         "total": len(providers),
+        "usage": usage_summary(),
         "generated_at": time.time(),
     }
 

@@ -54,6 +54,12 @@ The page reads credentials through the same config/env code path as the CLI and 
 
 Credential values are never exposed by the page or its endpoints; only presence and counts.
 
+### Usage logging
+
+Every successful CLI search appends one record to `~/.cache/web-search-cli/usage.jsonl` (append-only, best-effort, never fails a search). The dashboard shows the aggregated log: search counts per provider, last use, and — for Exa — accumulated cost from the `costDollars` field the API returns in each response body (free tier is ~$10/month of credits).
+
+Response headers that look like quota indicators (`x-remaining`, `x-ratelimit-*`, `x-quota-*`, …) are captured automatically on every provider response and logged when present; none of the current providers send them, so the log's header column stays empty today. If a provider adds such headers later, they appear without code changes.
+
 ## Docker Compose central server
 
 The included `docker-compose.yml` starts the central server with the API keys and config kept outside the image:
