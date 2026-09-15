@@ -33,6 +33,7 @@ The repository is being bootstrapped as `web-search-cli`: a CLI plus Codex skill
 - `POST /search` now also accepts named search fields (`{"query": "...", "provider": "exa"}`) alongside the existing `{"argv": [...]}` form, validating field names, types and enums before executing the search core.
 - Fixed the central server launching its own child searches as satellite clients when `WSP_SATELLITE_URL` is present in the server's `.env`; the server now blanks the satellite variables for child processes instead of only deleting them.
 - Added Google Custom Search JSON, SerpApi, ScraperAPI, and Bright Data adapters plus a broader free-tier catalog in `docs/providers.md`.
+- Added the plain REST search endpoint `POST /v1/search` (plus `GET /v1/search`): a flat SERP-style request body (`{"q": "...", "num": 5, "gl": "jp"}`) with top-level `properties`/`required` in the published schema, 1-based `position` on results, and `X-API-KEY` accepted alongside `Authorization: Bearer`. Both search endpoints now share one CLI execution path (`server.run_search_argv`), so `POST /search` and satellite behavior are unchanged.
 
 ## Open Risks
 

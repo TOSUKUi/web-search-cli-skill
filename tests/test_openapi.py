@@ -18,7 +18,7 @@ from web_search_cli import openapi, server as server_module
 from web_search_cli.search import build_parser
 
 
-EXPECTED_ENDPOINTS = {"/search", "/health", "/openapi.json"}
+EXPECTED_ENDPOINTS = {"/v1/search", "/search", "/health", "/openapi.json"}
 
 
 def _spec():

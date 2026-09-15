@@ -37,7 +37,16 @@ web-search-plus --serve \
 
 `WSP_SERVER_TOKEN`/`--server-token` are optional. When set, satellites must send the matching `--satellite-token`; when unset, the server is unauthenticated and should stay on a trusted network. The built-in server is HTTP only; use TLS termination or an SSH tunnel for non-local traffic. `docker-compose.yml` is the supported containerized server setup.
 
-The server documents itself: `GET /openapi.json` returns an OpenAPI 3.0 contract generated from the installed CLI parser, so it cannot drift from the flags that server accepts. `POST /search` takes either `{"argv": ["--provider","exa","--query","..."]}` or named fields (`{"query": "...", "provider": "exa", "max_results": 5}`); bad bodies return HTTP 400. Print the same document offline with `web-search-plus --openapi`.
+The server documents itself: `GET /openapi.json` returns an OpenAPI 3.0 contract generated from the installed CLI parser, so it cannot drift from the flags that server accepts. Print the same document offline with `web-search-plus --openapi`.
+
+For a direct HTTP call, prefer `POST /v1/search`: the body is the parameter object itself, so `q` is required and every CLI flag is a field under its own name. Short SERP names are accepted (`q`, `num`, `hl`, `gl`), values may arrive as text from a query string (`GET /v1/search?q=...&num=5`), and each result carries a 1-based `position`.
+
+```bash
+curl -X POST http://127.0.0.1:8765/v1/search -H 'Content-Type: application/json' \
+  -d '{"q": "latest AI news", "num": 5, "provider": "auto"}'
+```
+
+`POST /search` remains the CLI/satellite contract: it takes either `{"argv": ["--provider","exa","--query","..."]}` or named fields (`{"query": "...", "provider": "exa", "max_results": 5}`). Its request body is a `oneOf` of those two shapes, so a request generated from a schema converter should use `/v1/search` instead. Bad bodies on either endpoint return HTTP 400; `X-API-KEY: <token>` may replace `Authorization: Bearer <token>`.
 
 ### Satellite mode (client)
 

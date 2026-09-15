@@ -13,7 +13,7 @@ Deliver a CLI and Codex skill combination that can replace the `hermes-web-searc
 5. Maintain a provider catalog that distinguishes recurring monthly quotas, daily quotas, one-time credits, and SERP-scraping products.
 6. Support multiple provider API keys without breaking legacy credentials.
 7. Support optional satellite clients backed by one central config/search server.
-8. Keep the central server's HTTP contract machine-readable (`GET /openapi.json`) and derived from the CLI parser, so clients and code generators can consume it.
+8. Keep the central server's HTTP contract machine-readable (`GET /openapi.json`) and derived from the CLI parser, so clients and code generators can consume it, with `POST /v1/search` as the generator-friendly flat request form.
 9. Run non-network validation, then defer live search validation until credentials or SearXNG are available.
 
 ## Known Blockers
@@ -25,6 +25,7 @@ Deliver a CLI and Codex skill combination that can replace the `hermes-web-searc
 ## Recent Path Changes
 
 - The server-mode search API is now described by a generated OpenAPI 3.0 document (`web_search_cli/openapi.py`, served at `GET /openapi.json`, printable with `--openapi`). Request schemas come from `search.build_parser()`, which was extracted from `main()`; adding a CLI flag changes the published contract automatically. Hand-editing a static spec file is not an accepted path.
+- The `POST /search` request body is a top-level `oneOf` (`argv` or named fields). That is valid OpenAPI, but HTTP-client generators and LLM tool-schema converters that read only top-level `properties` flatten it to an empty schema and post `{}`, which the server reports as `Request must contain an "argv" array or named search fields`. `POST /v1/search` / `GET /v1/search` now publish one flat `properties` object with `q` required, so generated clients work; `POST /search` stays as the CLI/satellite dialect and `/openapi.json` documents both.
 - Server, satellite and credential-routing flags stay out of the published request body; the document lists them under `x-web-search-plus.unexposedFlags` with the reason each is absent.
 - The project goal was clarified: complete search-tool replacement as CLI plus skill, not a lightweight wrapper and not a Hermes plugin port.
 - Provider expansion remains compatible with the existing centralized dispatch/fallback model; the four new adapters are explicit/fallback providers and do not change intent routing.

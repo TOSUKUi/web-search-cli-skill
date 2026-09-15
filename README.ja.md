@@ -126,7 +126,7 @@ web-search-plus --serve \
   --server-host 127.0.0.1 --server-port 8765
 ```
 
-`WSP_SERVER_TOKEN`/`--server-token`は任意です。設定した場合、Satellite側にも同じ値を`--satellite-token`で指定します。未設定の場合は認証なしになるため、信頼できるネットワーク内で使用してください。組み込みサーバーはHTTPのみなので、外部公開時はTLSリバースプロキシまたはSSHトンネルを利用してください。サーバーは `POST /search` / `GET /health` / `GET /openapi.json` を提供します。API仕様は[中央サーバーのHTTP APIとopenapi.json](#中央サーバーのhttp-apiとopenapijson)を参照してください。
+`WSP_SERVER_TOKEN`/`--server-token`は任意です。設定した場合、Satellite側にも同じ値を`--satellite-token`で指定します。未設定の場合は認証なしになるため、信頼できるネットワーク内で使用してください。組み込みサーバーはHTTPのみなので、外部公開時はTLSリバースプロキシまたはSSHトンネルを利用してください。サーバーは `POST /v1/search` / `GET /v1/search` / `POST /search` / `GET /health` / `GET /openapi.json` を提供します。API仕様は[中央サーバーのHTTP APIとopenapi.json](#中央サーバーのhttp-apiとopenapijson)を参照してください。
 
 ### Satellite mode（クライアント）
 
@@ -151,6 +151,20 @@ curl -H "Authorization: Bearer $WSP_SERVER_TOKEN" http://127.0.0.1:8765/openapi.
 web-search-plus --openapi > openapi.json
 ```
 
+`POST /v1/search`は素朴なREST形式です。リクエストボディがそのままパラメータオブジェクトになります（SERP API風）。`q`必須、`num`/`hl`/`gl`はそれぞれ`max_results`/`language`/`country`の別名で、結果には1始まりの`position`が付きます。
+
+```bash
+curl -X POST http://127.0.0.1:8765/v1/search \
+  -H "Authorization: Bearer $WSP_SERVER_TOKEN" -H 'Content-Type: application/json' \
+  -d '{"q": "latest AI news", "num": 5, "provider": "auto"}'
+
+# クエリ文字列でも同じ検索ができる（curl・ブラウザ・動作確認用）
+curl -G http://127.0.0.1:8765/v1/search -H "Authorization: Bearer $WSP_SERVER_TOKEN" \
+  --data-urlencode 'q=latest AI news' --data-urlencode 'num=5'
+```
+
+`openapi.json`からクライアントを生成する場合やLLMツールとして公開する場合はこの形式を使ってください。トップレベルに`properties`を1つだけ持つ形できちんと公開されています（`POST /search`のボディは2形式の`oneOf`のみのため、素朴な変換器は空のオブジェクトに畳んで`{}`を送りがちです）。
+
 `POST /search`は次の2つの等価な形式を受け取ります。どちらで送っても中央CLIと同じ検索が実行されます。
 
 ```bash
@@ -165,7 +179,7 @@ curl -X POST http://127.0.0.1:8765/search \
   -d '{"query": "latest AI news", "provider": "auto", "max_results": 5, "compact": true}'
 ```
 
-JSONでない、既知フィールドがない、`query`/`similar_url`がない、未知のフィールド、列挙値外、拒否されたフラグはいずれもHTTP 400を返します。拒否されるのは、認証情報を含むリクエストの送信先を奪うもの（`--config`、`--searxng-url`、`--querit-base-url`、`--querit-base-path`）と別のサーバー/Satelliteを起動するもの（`--serve`、`--satellite*`）で、文書内の `x-web-search-plus.unexposedFlags` に理由付きで列挙されます。
+JSONでない、既知フィールドがない、`query`/`similar_url`（`/v1/search`では`q`）がない、未知のフィールド、列挙値外、拒否されたフラグはいずれもHTTP 400を返します。拒否されるのは、認証情報を含むリクエストの送信先を奪うもの（`--config`、`--searxng-url`、`--querit-base-url`、`--querit-base-path`）と別のサーバー/Satelliteを起動するもの（`--serve`、`--satellite*`）で、文書内の `x-web-search-plus.unexposedFlags` に理由付きで列挙されます。全エンドポイントで`Authorization: Bearer <トークン>`の代わりに`X-API-KEY: <トークン>`を使えます。
 
 ## 設定
 

@@ -10,9 +10,17 @@ named JSON field.
 
 Documented endpoints:
 
+    POST /v1/search     plain SERP form: flat JSON body, or query-string GET
     POST /search        run one search (argv form or named-field form)
     GET  /health        liveness probe
     GET  /openapi.json  this document
+
+``POST /v1/search`` exists because the ``/search`` request schema is a top-level
+``oneOf`` (argv *or* named fields), which HTTP-client generators and
+LLM tool-schema converters routinely flatten to an empty object. The plain form
+publishes one flat ``properties`` object with ``q`` required, so a client that
+only reads top-level ``properties`` still produces a working request. Both
+endpoints run the same CLI subprocess with the same server config.
 
 Credential-routing flags are never advertised, because the central server
 rejects them (see ``server.FORBIDDEN_SATELLITE_FLAGS``).
@@ -149,6 +157,108 @@ def search_flags(config: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]
 def omitted_flags(config: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
     """Parser flags that ``POST /search`` does not expose, with the reason."""
     return _inventory(config)[1]
+
+
+# SERP-API-style short names accepted by the plain endpoint (``POST /v1/search``).
+# The canonical names stay valid too, so one client can speak either dialect.
+FLAT_ALIASES: Dict[str, str] = {
+    "q": "query",
+    "num": "max_results",
+    "hl": "language",
+    "gl": "country",
+}
+
+FLAT_ENDPOINT = "/v1/search"
+
+
+def _coerce_flat_value(name: str, value: Any, spec: Dict[str, Any]) -> Any:
+    """Loosen a flat request value (query strings and headers are always text)."""
+    kind = spec["type"]
+    if kind == "boolean" and isinstance(value, str):
+        lowered = value.strip().lower()
+        if lowered in ("true", "1", "yes", "on"):
+            return True
+        if lowered in ("false", "0", "no", "off", ""):
+            return False
+        raise ValueError(f"{name} must be a boolean")
+    if kind == "boolean" and isinstance(value, int) and not isinstance(value, bool):
+        return bool(value)
+    if kind == "array" and isinstance(value, str):
+        return [item.strip() for item in value.split(",") if item.strip()]
+    return value
+
+
+def flat_to_argv(payload: Dict[str, Any], flags: Optional[List[Dict[str, Any]]] = None) -> List[str]:
+    """Convert a flat SERP-style request (``{"q": "...", "gl": "jp"}``) into CLI argv.
+
+    Accepts both the short SERP names in ``FLAT_ALIASES`` and the canonical
+    field names, plus text values as delivered by a query string. Validation is
+    delegated to ``structured_to_argv``, so unknown fields, enums and types fail
+    as HTTP 400 with the same message in either dialect.
+
+    Raises:
+        ValueError: unknown field, alias conflict, bad type, or a value outside an enum.
+    """
+    if not isinstance(payload, dict):
+        raise ValueError("Request body must be a JSON object")
+    known = flags if flags is not None else search_flags()
+    by_dest = {item["dest"]: item for item in known}
+
+    normalized: Dict[str, Any] = {}
+    for name, value in payload.items():
+        dest = FLAT_ALIASES.get(name, name)
+        if dest not in by_dest:
+            raise ValueError(
+                "Unknown search field(s): " + ", ".join(sorted({FLAT_ALIASES.get(name, name) for name in payload if FLAT_ALIASES.get(name, name) not in by_dest}))
+                + ". Send CLI flags as {\"argv\": [...]} to POST /search, or see GET /openapi.json."
+            )
+        if dest in normalized and normalized[dest] != value:
+            raise ValueError(f"{name} and {dest} disagree; send only one of them")
+        normalized[dest] = _coerce_flat_value(dest, value, by_dest[dest])
+
+    argv = structured_to_argv(normalized, known)
+    if not {"--query", "-q", "--similar-url"} & set(argv):
+        raise ValueError('Plain search request requires "q" (or "similar_url")')
+    return argv
+
+
+def flat_request_schema(flags: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
+    """`SearchRequestPlain`: one flat object, so client generators see every parameter.
+
+    Deliberately free of ``oneOf``/``anyOf`` at the top level: HTTP-client and
+    tool-schema generators that only read top-level ``properties`` must still
+    produce a valid request. Strictness that ``oneOf`` would express (``q``
+    unless ``similar_url``) is stated in ``required`` plus the description, and
+    enforced by the server.
+    """
+    known = flags if flags is not None else search_flags()
+    properties: Dict[str, Any] = {}
+    for spec in known:
+        schema = {k: v for k, v in spec.items() if k not in ("flag", "dest", "aliases")}
+        schema["x-cli-flag"] = spec["flag"]
+        if spec.get("aliases"):
+            schema["x-cli-aliases"] = spec["aliases"]
+        properties[spec["dest"]] = schema
+    query = dict(properties["query"])
+    properties["q"] = {**query, "description": (query.get("description") or "Search query") + " (SERP-style alias of `query`)."}
+    for short, dest in (("num", "max_results"), ("hl", "language"), ("gl", "country")):
+        alias = dict(properties[dest])
+        alias["description"] = f"SERP-style alias of `{dest}`."
+        properties[short] = alias
+    return {
+        "type": "object",
+        "title": "SearchRequestPlain",
+        "description": (
+            "Flat search request: the body IS the parameter object, no wrapper key. "
+            "`q` is required unless `similar_url` is set. Short SERP names `q`, `num`, "
+            "`hl`, `gl` mirror `query`, `max_results`, `language`, `country`. "
+            "Every other CLI flag is available under its own name; `--flag value` becomes "
+            "`{\"flag\": value}`."
+        ),
+        "properties": properties,
+        "required": ["q"],
+        "additionalProperties": False,
+    }
 
 
 def structured_to_argv(payload: Dict[str, Any], flags: Optional[List[Dict[str, Any]]] = None) -> List[str]:
@@ -347,6 +457,45 @@ def _unauthorized() -> Dict[str, Any]:
     }
 
 
+# Fields worth putting in a query string. The plain endpoint accepts all of them
+# in a JSON body; GET stays short on purpose.
+FLAT_GET_PARAMS = (
+    "q", "num", "hl", "gl", "provider", "time_range", "freshness",
+    "include_domains", "exclude_domains", "engines", "compact", "no_cache",
+)
+
+
+def _flat_query_parameters(
+    flat_schema: Dict[str, Any], names: Tuple[str, ...] = FLAT_GET_PARAMS
+) -> List[Dict[str, Any]]:
+    """Query-string parameters for ``GET /v1/search``, derived from the flat schema."""
+    required = set(flat_schema.get("required", []))
+    parameters: List[Dict[str, Any]] = []
+    for name in names:
+        prop = flat_schema["properties"].get(name)
+        if not prop:
+            continue
+        schema = {k: v for k, v in prop.items() if not k.startswith("x-")}
+        description = schema.pop("description", "")
+        if schema.get("type") == "array":
+            schema = {"type": "string"}
+            description = (description + " " if description else "") + "Comma-separated."
+        elif schema.get("type") == "boolean":
+            schema = {"type": "string", "enum": ["true", "false"]}
+        elif schema.get("type") == "integer":
+            schema = {"type": "string", "pattern": "^[0-9]+$"}
+        parameter: Dict[str, Any] = {
+            "name": name,
+            "in": "query",
+            "required": name in required,
+            "schema": schema,
+        }
+        if description:
+            parameter["description"] = description
+        parameters.append(parameter)
+    return parameters
+
+
 def _fields_schema(flags: List[Dict[str, Any]]) -> Dict[str, Any]:
     """`SearchFields`: named JSON fields mirroring the accepted CLI flags."""
     properties: Dict[str, Any] = {}
@@ -418,6 +567,40 @@ def build_openapi_spec(
         "description": "Send either raw CLI `argv` or named search fields, never both.",
         "oneOf": [_argv_schema(), {"$ref": "#/components/schemas/SearchFields"}],
     }
+    flat_schema = flat_request_schema(flags)
+
+    # Shared by both search endpoints: the execution path is the same CLI subprocess.
+    description = (
+        "Executes the search core with the supplied arguments, applying the server's "
+        "own configuration, provider credentials, provider cooldowns and cache. Behaviour "
+        "is identical to running the CLI on the server host.\n\n"
+        "Providers tried: `" + "`, `".join(PROVIDERS[:-1]) + "`, or `auto` for "
+        "intent-based routing. If the chosen provider fails or returns too few "
+        "results, configured providers are tried in the server's priority order; the "
+        "response `routing` object reports any fallback.\n\n"
+        "Authentication: `Authorization: Bearer <token>` (or `X-API-KEY: <token>`), when the "
+        "server was started with a token."
+    )
+    search_responses = {
+        "200": {
+            "description": "Search results from the first provider that satisfied the request.",
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/SearchResult"}}},
+        },
+        "400": {"$ref": "#/components/responses/MalformedRequest"},
+        "401": _unauthorized(),
+        "413": {
+            "description": "Request body larger than the server's 256 KiB limit.",
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}},
+        },
+        "502": {
+            "description": "All providers failed, or the search core exited non-zero.",
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/SearchUpstreamError"}}},
+        },
+        "504": {
+            "description": "Search exceeded the server's 300 s execution timeout.",
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}},
+        },
+    }
 
     return {
         "openapi": OPENAPI_VERSION,
@@ -426,11 +609,13 @@ def build_openapi_spec(
             "version": __version__,
             "description": (
                 "HTTP front end for the `web-search-plus` search core. The server owns provider "
-                "credentials and configuration; clients send search requests only. Requests are "
-                "either raw CLI arguments (`argv`) or named fields mirroring the same flags, so "
-                "behaviour is identical to running the CLI on the server host.\n\n"
+                "credentials and configuration; clients send search requests only. `" + FLAT_ENDPOINT + "` "
+                "takes a flat SERP-style request (`{\"q\": \"...\"}` as JSON, or a query string over "
+                "GET); `POST /search` additionally takes raw CLI arguments. Both run the same search "
+                "core on the server, so behaviour is identical to running the CLI on the server host.\n\n"
                 "Authentication: when the server is started with `--server-token` (or "
-                "`WSP_SERVER_TOKEN`), every endpoint requires `Authorization: Bearer <token>`. "
+                "`WSP_SERVER_TOKEN`), every endpoint requires `Authorization: Bearer <token>` "
+                "(the `X-API-KEY` header is accepted too). "
                 "An unauthenticated server accepts anonymous requests and must stay on a trusted "
                 "network; the server speaks plain HTTP, so terminate TLS in front of it."
             ),
@@ -442,48 +627,48 @@ def build_openapi_spec(
             {"name": "meta", "description": "Liveness and interface description."},
         ],
         "paths": {
+            FLAT_ENDPOINT: {
+                "post": {
+                    "tags": ["search"],
+                    "operationId": "searchPlain",
+                    "summary": "Run one search with a flat SERP-style request",
+                    "description": description + "\n\n"
+                        "The body is the parameter object itself (`{\"q\": \"...\"}`), so "
+                        "HTTP-client generators and LLM tool schemas see every parameter as a "
+                        "top-level property; `POST /search` remains available for raw CLI argv.",
+                    "requestBody": {
+                        "required": True,
+                        "content": {"application/json": {"schema": flat_schema, "example": {"q": "latest AI news", "num": 5, "provider": "auto"}}},
+                    },
+                    "responses": search_responses,
+                },
+                "get": {
+                    "tags": ["search"],
+                    "operationId": "searchPlainGet",
+                    "summary": "Run one search from a query string",
+                    "description": description + "\n\n"
+                        "Same search, for `curl`, a browser and anything else that only speaks GET. "
+                        "Array fields are comma-joined: `include_domains=a.com,b.com`.",
+                    "parameters": _flat_query_parameters(flat_schema),
+                    "responses": search_responses,
+                },
+            },
             "/search": {
                 "post": {
                     "tags": ["search"],
                     "operationId": "search",
                     "summary": "Run one search on the central server",
-                    "description": (
-                        "Executes the search core with the supplied arguments, applying the server's "
-                        "own configuration, provider credentials, provider cooldowns and cache.\n\n"
-                        "Providers tried: `" + "`, `".join(PROVIDERS[:-1]) + "`, or `auto` for "
-                        "intent-based routing. If the chosen provider fails or returns too few "
-                        "results, configured providers are tried in the server's priority order; the "
-                        "response `routing` object reports any fallback.\n\n"
-                        "Rejected flags: `" + "`, `".join(sorted(item["flag"] for item in omitted if item["reason"] == "rejected_by_server")) + "` "
+                    "description": description + "\n\n"
+                        + "Rejected flags: `" + "`, `".join(sorted(item["flag"] for item in omitted if item["reason"] == "rejected_by_server")) + "` "
                         "(they would redirect a credential-bearing request); they produce HTTP 400.\n\n"
                         "Maintenance flags `--clear-cache` and `--cache-stats` are accepted as argv "
                         "and return cache bookkeeping instead of results. The named-field form requires "
-                        "`query` (or `similar_url`)."
-                    ),
+                        "`query` (or `similar_url`).",
                     "requestBody": {
                         "required": True,
                         "content": {"application/json": {"schema": {"$ref": "#/components/schemas/SearchRequest"}}},
                     },
-                    "responses": {
-                        "200": {
-                            "description": "Search results from the first provider that satisfied the request.",
-                            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/SearchResult"}}},
-                        },
-                        "400": {"$ref": "#/components/responses/MalformedRequest"},
-                        "401": _unauthorized(),
-                        "413": {
-                            "description": "Request body larger than the server's 256 KiB limit.",
-                            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}},
-                        },
-                        "502": {
-                            "description": "All providers failed, or the search core exited non-zero.",
-                            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/SearchUpstreamError"}}},
-                        },
-                        "504": {
-                            "description": "Search exceeded the server's 300 s execution timeout.",
-                            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}},
-                        },
-                    },
+                    "responses": search_responses,
                 }
             },
             "/health": {
@@ -534,6 +719,7 @@ def build_openapi_spec(
             },
             "schemas": {
                 "SearchRequest": search_request,
+                "SearchRequestPlain": flat_schema,
                 "SearchArgv": _argv_schema(),
                 "SearchFields": _fields_schema(flags),
                 "SearchResult": SEARCH_RESPONSE,
@@ -547,8 +733,8 @@ def build_openapi_spec(
                 "MalformedRequest": {
                     "description": (
                         "Body is not JSON, has no `argv` and no known fields, omits `query`/`similar_url` "
-                        "in the named-field form, uses an unknown field, violates an enum, or uses a "
-                        "rejected flag."
+                        "or `q`/`similar_url` in the named-field forms, uses an unknown field, violates an "
+                        "enum, or uses a rejected flag."
                     ),
                     "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}},
                 }
@@ -557,6 +743,7 @@ def build_openapi_spec(
         "x-web-search-plus": {
             "cli": "web-search-plus",
             "searchFields": {spec["dest"]: spec["flag"] for spec in flags},
+            "serpAliases": dict(FLAT_ALIASES),
             "unexposedFlags": omitted,
             "limits": {"maxRequestBodyBytes": 262144, "searchTimeoutSeconds": 300},
             "authentication": "bearer",

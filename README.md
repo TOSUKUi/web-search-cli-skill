@@ -82,7 +82,7 @@ web-search-plus --satellite http://127.0.0.1:8765 \
 
 If `WSP_SERVER_TOKEN` is set on the server, add `--satellite-token "<the token value>"`.
 
-The server describes itself: `GET /openapi.json` returns the OpenAPI 3.0 document for `POST /search` and `GET /health` (see [Server HTTP API and `openapi.json`](#server-http-api-and-openapijson)).
+The server describes itself: `GET /openapi.json` returns the OpenAPI 3.0 document for `POST /v1/search`, `POST /search` and `GET /health` (see [Server HTTP API and `openapi.json`](#server-http-api-and-openapijson)).
 
 `config.json` is mounted read-only and the cache uses a named Docker volume. Do not commit `.env` or `config.json`.
 
@@ -154,7 +154,7 @@ web-search-plus --serve --config /srv/web-search/config.json --server-host 127.0
 web-search-plus --satellite http://127.0.0.1:8765 --provider auto --query "latest AI news" --compact
 ```
 
-The server accepts `POST /search`, `GET /health` and `GET /openapi.json` requests. `WSP_SERVER_TOKEN` and `--satellite-token` are optional; set them when bearer authentication is desired. Satellite mode forwards search flags only; API keys stay on the central server. `--server-host` and `--server-port` are the server flags. For non-local use, put it behind TLS or an SSH tunnel; the built-in server is HTTP only.
+The server accepts `POST /v1/search`, `GET /v1/search`, `POST /search`, `GET /health` and `GET /openapi.json` requests. `WSP_SERVER_TOKEN` and `--satellite-token` are optional; set them when bearer authentication is desired. Satellite mode forwards search flags only; API keys stay on the central server. `--server-host` and `--server-port` are the server flags. For non-local use, put it behind TLS or an SSH tunnel; the built-in server is HTTP only.
 
 ### Server HTTP API and `openapi.json`
 
@@ -166,6 +166,20 @@ curl -H "Authorization: Bearer $WSP_SERVER_TOKEN" http://127.0.0.1:8765/openapi.
 # Or print the same document without starting a server:
 web-search-plus --openapi > openapi.json
 ```
+
+`POST /v1/search` is the plain form: the body *is* the parameter object, SERP-style, with `q` required and `num`/`hl`/`gl` as short names for `max_results`/`language`/`country`. Every other CLI flag is a field under its own name (`--time-range week` → `"time_range": "week"`), and each result comes back with a 1-based `position`:
+
+```bash
+curl -X POST http://127.0.0.1:8765/v1/search \
+  -H "Authorization: Bearer $WSP_SERVER_TOKEN" -H 'Content-Type: application/json' \
+  -d '{"q": "latest AI news", "num": 5, "provider": "auto"}'
+
+# Same search over a query string, for curl, a browser, or a monitoring check:
+curl -G http://127.0.0.1:8765/v1/search -H "Authorization: Bearer $WSP_SERVER_TOKEN" \
+  --data-urlencode 'q=latest AI news' --data-urlencode 'num=5'
+```
+
+Use this form when the client is generated from `openapi.json` or exposed as an LLM tool: it publishes one flat `properties` object, whereas the `POST /search` body is a `oneOf` of two shapes, which naive schema converters flatten to an empty object and then post `{}`.
 
 `POST /search` accepts two equivalent bodies — the raw CLI form, and named fields mirroring the same flags (validated against the same enums before anything runs):
 
@@ -181,7 +195,7 @@ curl -X POST http://127.0.0.1:8765/search \
   -d '{"query": "latest AI news", "provider": "auto", "max_results": 5, "compact": true}'
 ```
 
-Malformed bodies, unknown fields, invalid enum values and rejected flags return HTTP 400. Rejected flags are the ones that would redirect a credential-bearing request (`--config`, `--searxng-url`, `--querit-base-url`, `--querit-base-path`) or start another server/satellite (`--serve`, `--satellite*`); they are listed under `x-web-search-plus.unexposedFlags` in the document, each with its reason.
+Malformed bodies, unknown fields, invalid enum values and rejected flags return HTTP 400. Rejected flags are the ones that would redirect a credential-bearing request (`--config`, `--searxng-url`, `--querit-base-url`, `--querit-base-path`) or start another server/satellite (`--serve`, `--satellite*`); they are listed under `x-web-search-plus.unexposedFlags` in the document, each with its reason. `X-API-KEY: <token>` is accepted in place of `Authorization: Bearer <token>` on every endpoint.
 
 Common variables:
 
