@@ -78,7 +78,7 @@ web-search-plus --satellite http://127.0.0.1:8765 \
   --query "latest AI news" --compact
 ```
 
-`WSP_SERVER_TOKEN`を設定した場合は、Satellite側で`--satellite-token "<トークンの値>"`を追加してください。`WSP_SERVER_TOKEN`は任意です。設定した場合だけBearer認証が有効になります。`config.json`はread-onlyでマウントされ、キャッシュはDocker named volumeに保存されます。`.env`と`config.json`はコミットしないでください。
+`WSP_SERVER_TOKEN`を設定した場合は、Satellite側で`--satellite-token "<トークンの値>"`を追加してください。`WSP_SERVER_TOKEN`は任意です。設定した場合だけBearer認証が有効になります。サーバー自身の実行中なら`GET /openapi.json`でAPI仕様（OpenAPI 3.0）を取得できます。`config.json`はread-onlyでマウントされ、キャッシュはDocker named volumeに保存されます。`.env`と`config.json`はコミットしないでください。
 
 ## 対応プロバイダー
 
@@ -126,7 +126,7 @@ web-search-plus --serve \
   --server-host 127.0.0.1 --server-port 8765
 ```
 
-`WSP_SERVER_TOKEN`/`--server-token`は任意です。設定した場合、Satellite側にも同じ値を`--satellite-token`で指定します。未設定の場合は認証なしになるため、信頼できるネットワーク内で使用してください。組み込みサーバーはHTTPのみなので、外部公開時はTLSリバースプロキシまたはSSHトンネルを利用してください。
+`WSP_SERVER_TOKEN`/`--server-token`は任意です。設定した場合、Satellite側にも同じ値を`--satellite-token`で指定します。未設定の場合は認証なしになるため、信頼できるネットワーク内で使用してください。組み込みサーバーはHTTPのみなので、外部公開時はTLSリバースプロキシまたはSSHトンネルを利用してください。サーバーは `POST /search` / `GET /health` / `GET /openapi.json` を提供します。API仕様は[中央サーバーのHTTP APIとopenapi.json](#中央サーバーのhttp-apiとopenapijson)を参照してください。
 
 ### Satellite mode（クライアント）
 
@@ -139,6 +139,33 @@ web-search-plus --satellite http://127.0.0.1:8765 \
 ```
 
 プロバイダー認証情報は中央サーバー側で解決されます。Satelliteから中央設定や認証情報を送信先ごと上書きすることはできません。`WSP_SATELLITE_URL`でもSatellite modeを選択できます。
+
+### 中央サーバーのHTTP APIと`openapi.json`
+
+中央サーバーは自分のAPI仕様を OpenAPI 3.0 文書として `GET /openapi.json` で公開します。文書はインストール済みのCLIパーサーから生成されるため、公開されるフラグ・型・列挙値は常にそのサーバーが実際に受け付けるものと一致します（手書き仕様がズレることはありません）。
+
+```bash
+curl -H "Authorization: Bearer $WSP_SERVER_TOKEN" http://127.0.0.1:8765/openapi.json
+
+# サーバーを起動せずに同じ文書を表示
+web-search-plus --openapi > openapi.json
+```
+
+`POST /search`は次の2つの等価な形式を受け取ります。どちらで送っても中央CLIと同じ検索が実行されます。
+
+```bash
+# CLIのargv形式
+curl -X POST http://127.0.0.1:8765/search \
+  -H "Authorization: Bearer $WSP_SERVER_TOKEN" -H 'Content-Type: application/json' \
+  -d '{"argv": ["--provider", "auto", "--query", "latest AI news", "--compact"]}'
+
+# 名前付きフィールド形式（同じ列挙値で送信時に検証される）
+curl -X POST http://127.0.0.1:8765/search \
+  -H "Authorization: Bearer $WSP_SERVER_TOKEN" -H 'Content-Type: application/json' \
+  -d '{"query": "latest AI news", "provider": "auto", "max_results": 5, "compact": true}'
+```
+
+JSONでない、既知フィールドがない、`query`/`similar_url`がない、未知のフィールド、列挙値外、拒否されたフラグはいずれもHTTP 400を返します。拒否されるのは、認証情報を含むリクエストの送信先を奪うもの（`--config`、`--searxng-url`、`--querit-base-url`、`--querit-base-path`）と別のサーバー/Satelliteを起動するもの（`--serve`、`--satellite*`）で、文書内の `x-web-search-plus.unexposedFlags` に理由付きで列挙されます。
 
 ## 設定
 

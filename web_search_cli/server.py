@@ -3,6 +3,12 @@
 The server deliberately uses the existing CLI as the execution boundary. This
 keeps provider behavior identical in local and satellite modes while ensuring
 that credentials and config stay on the server host.
+
+Search requests are accepted in two equivalent forms: the raw CLI form
+`{"argv": ["--query", "..."]}` and the named-field form described by the
+OpenAPI 3 document served at `GET /openapi.json` (also printable offline with
+`web-search-plus --openapi`). That document is generated from the CLI parser
+itself, so it cannot drift from the flags the CLI accepts.
 """
 
 import hmac
@@ -16,6 +22,11 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
+
+try:  # package import
+    from .openapi import build_openapi_spec, search_flags, structured_to_argv
+except ImportError:  # direct script execution inside the package directory
+    from openapi import build_openapi_spec, search_flags, structured_to_argv  # type: ignore[no-redef]
 
 
 class SatelliteError(RuntimeError):
@@ -93,6 +104,35 @@ def _is_loopback_bind(host: str) -> bool:
         return False
 
 
+def _flag_table(server: Any) -> List[Dict[str, Any]]:
+    """Derived flag table, built once per server process."""
+    flags = getattr(server, "wsp_flags", None)
+    if flags is None:
+        flags = search_flags()
+        server.wsp_flags = flags
+    return flags
+
+
+def _openapi_document(server: Any) -> Dict[str, Any]:
+    """OpenAPI document for this server, built on first request and cached.
+
+    Built from the server's own config so published flag defaults match what the
+    server will actually apply.
+    """
+    document = getattr(server, "wsp_openapi_spec", None)
+    if document is None:
+        try:
+            from .search import load_config
+        except ImportError:
+            from search import load_config  # type: ignore[no-redef]
+        document = build_openapi_spec(
+            config=load_config(str(server.wsp_config_path)),
+            bind_url=getattr(server, "wsp_bind_url", None),
+        )
+        server.wsp_openapi_spec = document
+    return document
+
+
 def serve(config_path: Path, host: str = "127.0.0.1", port: int = 8765, token: Optional[str] = None) -> None:
     """Run the central server until interrupted."""
     config_path = Path(config_path).expanduser().resolve()
@@ -102,12 +142,14 @@ def serve(config_path: Path, host: str = "127.0.0.1", port: int = 8765, token: O
     server = ThreadingHTTPServer((host, port), _Handler)
     server.wsp_config_path = config_path  # type: ignore[attr-defined]
     server.wsp_token = expected_token  # type: ignore[attr-defined]
+    server.wsp_bind_url = f"http://{host}:{port}"  # type: ignore[attr-defined]
     print(json.dumps({
         "mode": "central",
         "host": host,
         "port": port,
         "config": str(config_path),
         "authentication": bool(expected_token),
+        "endpoints": ["POST /search", "GET /health", "GET /openapi.json"],
     }), flush=True)
     try:
         server.serve_forever()
@@ -138,7 +180,28 @@ class _Handler(BaseHTTPRequestHandler):
         if self.path == "/health":
             _json_response(self, 200, {"ok": True, "mode": "central", "config": str(self.server.wsp_config_path)})  # type: ignore[attr-defined]
             return
+        if self.path == "/openapi.json":
+            _json_response(self, 200, _openapi_document(self.server))
+            return
         _json_response(self, 404, {"error": "Not found"})
+
+    def _request_argv(self, payload: Any) -> List[str]:
+        """Accept raw CLI argv or named search fields, returning CLI arguments."""
+        if not isinstance(payload, dict):
+            raise ValueError("Request body must be a JSON object")
+        argv = payload.get("argv")
+        if argv is not None:
+            if not isinstance(argv, list) or not all(isinstance(item, str) for item in argv):
+                raise ValueError("Request must contain an argv array of strings")
+            return argv
+        if payload:
+            argv = structured_to_argv(payload, _flag_table(self.server))
+            # GET /openapi.json declares query-or-similar_url as required for this
+            # form, so reject it here instead of letting the CLI fail as a 502.
+            if not {"--query", "-q", "--similar-url"} & set(argv):
+                raise ValueError('Named search fields require "query" (or "similar_url")')
+            return argv
+        raise ValueError('Request must contain an "argv" array or named search fields')
 
     def do_POST(self) -> None:
         if not self._authorized():
@@ -153,15 +216,16 @@ class _Handler(BaseHTTPRequestHandler):
                 _json_response(self, 413, {"error": "Request body is too large"})
                 return
             payload = json.loads(self.rfile.read(length).decode("utf-8"))
-            argv = payload.get("argv")
-            if not isinstance(argv, list) or not all(isinstance(item, str) for item in argv):
-                raise ValueError("Request must contain an argv array of strings")
+            argv = self._request_argv(payload)
             validate_forwarded_argv(argv)
             config_path = Path(self.server.wsp_config_path)  # type: ignore[attr-defined]
             command = [sys.executable, "-m", "web_search_cli.search", "--config", str(config_path), *argv]
             child_env = os.environ.copy()
-            child_env.pop("WSP_SATELLITE_URL", None)
-            child_env.pop("WSP_SATELLITE_TOKEN", None)
+            # A satellite URL in the server's own .env would otherwise turn the
+            # child search back into a satellite client (dotenv does not
+            # override process variables, so blank them here).
+            child_env["WSP_SATELLITE_URL"] = ""
+            child_env["WSP_SATELLITE_TOKEN"] = ""
             package_root = Path(__file__).resolve().parent.parent
             existing_pythonpath = child_env.get("PYTHONPATH")
             child_env["PYTHONPATH"] = str(package_root) + (os.pathsep + existing_pythonpath if existing_pythonpath else "")

@@ -37,6 +37,8 @@ web-search-plus --serve \
 
 `WSP_SERVER_TOKEN`/`--server-token` are optional. When set, satellites must send the matching `--satellite-token`; when unset, the server is unauthenticated and should stay on a trusted network. The built-in server is HTTP only; use TLS termination or an SSH tunnel for non-local traffic. `docker-compose.yml` is the supported containerized server setup.
 
+The server documents itself: `GET /openapi.json` returns an OpenAPI 3.0 contract generated from the installed CLI parser, so it cannot drift from the flags that server accepts. `POST /search` takes either `{"argv": ["--provider","exa","--query","..."]}` or named fields (`{"query": "...", "provider": "exa", "max_results": 5}`); bad bodies return HTTP 400. Print the same document offline with `web-search-plus --openapi`.
+
 ### Satellite mode (client)
 
 `--satellite URL` forwards the search request to a server instead of calling providers locally. The satellite does not need provider API keys; provider credentials are resolved by the central server.

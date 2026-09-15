@@ -29,6 +29,9 @@ The repository is being bootstrapped as `web-search-cli`: a CLI plus Codex skill
 - Added optional central server/satellite mode (`--serve` and `--satellite`); the central host owns credentials/config and exposes optionally authenticated search and health endpoints.
 - Added a minimal Docker Compose deployment (`docker-compose.yml`) with a read-only central config mount, optional server token, non-root container user, and persistent cache volume.
 - Added a Japanese user-facing README at `README.ja.md` and linked it from the English README.
+- Published the server-mode HTTP contract as an OpenAPI 3.0 document at `GET /openapi.json`, generated from the CLI parser itself (`web_search_cli/openapi.py` + `search.build_parser()`), plus a `web-search-plus --openapi` flag to print it without a server.
+- `POST /search` now also accepts named search fields (`{"query": "...", "provider": "exa"}`) alongside the existing `{"argv": [...]}` form, validating field names, types and enums before executing the search core.
+- Fixed the central server launching its own child searches as satellite clients when `WSP_SATELLITE_URL` is present in the server's `.env`; the server now blanks the satellite variables for child processes instead of only deleting them.
 - Added Google Custom Search JSON, SerpApi, ScraperAPI, and Bright Data adapters plus a broader free-tier catalog in `docs/providers.md`.
 
 ## Open Risks

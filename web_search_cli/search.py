@@ -2839,9 +2839,13 @@ def _satellite_argv(argv: List[str]) -> List[str]:
     return result
 
 
-def main():
-    config = load_config(_config_path_from_argv(sys.argv[1:]))
-    
+def build_parser(config: Dict[str, Any]) -> argparse.ArgumentParser:
+    """Build the CLI argument parser.
+
+    Kept separate from ``main()`` so the OpenAPI document published by server
+    mode (:mod:`web_search_cli.openapi`) can derive its request schema from the
+    same parser instead of a hand-maintained copy that can drift.
+    """
     parser = argparse.ArgumentParser(
         description="Web Search Plus — Intelligent multi-provider search with smart auto-routing",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -3098,8 +3102,32 @@ Full docs: See README.md and SKILL.md
         action="store_true",
         help="Show cache statistics and exit"
     )
-    
+    parser.add_argument(
+        "--openapi",
+        action="store_true",
+        help="Print the OpenAPI 3 document of the search interface and exit"
+    )
+    return parser
+
+
+def main():
+    config = load_config(_config_path_from_argv(sys.argv[1:]))
+    # execute_search() reads provider defaults straight from the config.
+    querit_config = config.get("querit", {})
+    serpapi_config = config.get("serpapi", {})
+    scraperapi_config = config.get("scraperapi", {})
+    brightdata_config = config.get("brightdata", {})
+    parser = build_parser(config)
     args = parser.parse_args()
+
+    if args.openapi:
+        try:
+            from .openapi import build_openapi_spec
+        except ImportError:
+            from openapi import build_openapi_spec
+        indent = None if args.compact else 2
+        print(json.dumps(build_openapi_spec(parser), indent=indent, ensure_ascii=False))
+        return
 
     if args.serve:
         try:

@@ -82,6 +82,8 @@ web-search-plus --satellite http://127.0.0.1:8765 \
 
 If `WSP_SERVER_TOKEN` is set on the server, add `--satellite-token "<the token value>"`.
 
+The server describes itself: `GET /openapi.json` returns the OpenAPI 3.0 document for `POST /search` and `GET /health` (see [Server HTTP API and `openapi.json`](#server-http-api-and-openapijson)).
+
 `config.json` is mounted read-only and the cache uses a named Docker volume. Do not commit `.env` or `config.json`.
 
 ## Providers
@@ -152,7 +154,34 @@ web-search-plus --serve --config /srv/web-search/config.json --server-host 127.0
 web-search-plus --satellite http://127.0.0.1:8765 --provider auto --query "latest AI news" --compact
 ```
 
-The server accepts `/search` and `/health` requests. `WSP_SERVER_TOKEN` and `--satellite-token` are optional; set them when bearer authentication is desired. Satellite mode forwards search flags only; API keys stay on the central server. `--server-host` and `--server-port` are the server flags. For non-local use, put it behind TLS or an SSH tunnel; the built-in server is HTTP only.
+The server accepts `POST /search`, `GET /health` and `GET /openapi.json` requests. `WSP_SERVER_TOKEN` and `--satellite-token` are optional; set them when bearer authentication is desired. Satellite mode forwards search flags only; API keys stay on the central server. `--server-host` and `--server-port` are the server flags. For non-local use, put it behind TLS or an SSH tunnel; the built-in server is HTTP only.
+
+### Server HTTP API and `openapi.json`
+
+The central server publishes its own OpenAPI 3.0 document at `GET /openapi.json`. The document is generated from the installed CLI parser, so the documented flags, types and enum members always match what that server actually accepts — there is no hand-written spec to go stale:
+
+```bash
+curl -H "Authorization: Bearer $WSP_SERVER_TOKEN" http://127.0.0.1:8765/openapi.json
+
+# Or print the same document without starting a server:
+web-search-plus --openapi > openapi.json
+```
+
+`POST /search` accepts two equivalent bodies — the raw CLI form, and named fields mirroring the same flags (validated against the same enums before anything runs):
+
+```bash
+# CLI argv form
+curl -X POST http://127.0.0.1:8765/search \
+  -H "Authorization: Bearer $WSP_SERVER_TOKEN" -H 'Content-Type: application/json' \
+  -d '{"argv": ["--provider", "auto", "--query", "latest AI news", "--compact"]}'
+
+# Named-field form
+curl -X POST http://127.0.0.1:8765/search \
+  -H "Authorization: Bearer $WSP_SERVER_TOKEN" -H 'Content-Type: application/json' \
+  -d '{"query": "latest AI news", "provider": "auto", "max_results": 5, "compact": true}'
+```
+
+Malformed bodies, unknown fields, invalid enum values and rejected flags return HTTP 400. Rejected flags are the ones that would redirect a credential-bearing request (`--config`, `--searxng-url`, `--querit-base-url`, `--querit-base-path`) or start another server/satellite (`--serve`, `--satellite*`); they are listed under `x-web-search-plus.unexposedFlags` in the document, each with its reason.
 
 Common variables:
 
